@@ -1,0 +1,46 @@
+#version 1.0 2025.12.02
+##
+#conda update -n base conda
+#conda install -n base conda-libmamba-solver
+#conda config --set solver libmamba
+#
+#conda env create -f environment.yml
+#
+#conda env update -f environment.yml --prune
+#conda remove --name tethys_tasks --all
+#
+#conda env export > "tethys_tasks_real.yml"
+#
+#conda activate tethys_tasks
+#python -m ipykernel install --user --name=tethys_tasks
+
+name: tethys_tasks
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - cdsapi
+  - xarray
+  - cfgrib
+  - gdal
+  - scikit-learn
+  - pandas
+  - matplotlib
+  - numpy<2
+  - scipy
+  - netcdf4
+  - statsmodels
+  - cartopy
+  - ipykernel
+  - rasterio
+  - pip
+  - pip:
+    - BeautifulSoup4
+    - seaborn
+    - xlwings
+    - openpyxl
+    - wheel
+    - meteodata-lab[regrid]~=0.4
+    - earthkit-plots>=0.3,<0.4
+    - nbconvert>=7.16.6
+    - nbformat>=5.10.4
