@@ -1,58 +1,12 @@
-import pandas as pd
+from .functions import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor
+from .base import BaseTask
+from .era5 import ERA5_ZAMBEZI_T2M, ERA5_ZAMBEZI_TP
+from .irm import ALARO40L_CR, ALARO40L_T2M, ALARO40L_TP
+from .gfs import GFS_025_T2M_CAUCASUS
 
-class BaseTask:
-    REPORT_FAILURE = True
-    REPORT_SUCCESS = True
-    REPORT_SUCCESS_CYCLE = '00:00:00
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def report_failure(self, ex):
-        print(f"Task failed: {ex}")
-
-    def report_success(self, ex):
-        print(f"Task failed: {ex}")
-
-    def upload_to_azure(self, *args, **kwargs):
-        print("Uploading to Azure...")
-
-    def cleanup(self):
-        print("Cleaning up...")
-
-class Retrieve_ICON_CH1_EPS(BaseTask):
-    MEMORY = pd.Timedelta('2d')
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def populate(self):
-        print("Populating ICON CH1 EPS data...")
-
-    def retrieve(self):
-        print("Downloading ICON CH1 EPS data...")
-
-    def process(self):
-        print("Processing ICON CH1 EPS data...")
-
-    def delete(self):
-        print("Deleting temporary ICON CH1 EPS data...")
-
-
-class Retrieve_ICON_CH2_EPS(BaseTask):
-    pass
-
-class Retrieve_ERA5_LAND(BaseTask):
-    pass
-
-class Retrieve_IMERG(BaseTask):
-    pass
-
-class Retrieve_GFS(BaseTask):
-    pass
-
-class Retrieve_ICON(BaseTask):
-    pass
-
-class Retrieve_Wallonie(BaseTask):
-    pass
+__all__ = ['CaptureNewVariables', 'running_in_docker', 'DownloadMonitor', 'UploadMonitor',
+           'BaseTask',
+           'ERA5_ZAMBEZI_T2M', 'ERA5_ZAMBEZI_TP',
+           'ALARO40L_CR', 'ALARO40L_T2M', 'ALARO40L_TP',
+           'GFS_025_T2M_CAUCASUS',
+           ]

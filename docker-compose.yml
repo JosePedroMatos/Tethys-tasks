@@ -1,0 +1,12 @@
+services:
+  tethys-tasks:
+    build: .
+    image: tethys-tasks:latest
+    container_name: tethys-tasks-worker
+    command: ["--help"]
+    env_file:
+      - .env
+    volumes:
+      - ${LOCAL_FILE_FOLDER}:${LOCAL_FILE_FOLDER_DOCKER}
+      - ${STORAGE_FILE_FOLDER}:${STORAGE_FILE_FOLDER_DOCKER}
+

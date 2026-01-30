@@ -25,6 +25,8 @@ dependencies:
   - gdal
   - scikit-learn
   - pandas
+  - pyarrow
+  - python-dotenv
   - matplotlib
   - numpy<2
   - scipy
@@ -39,8 +41,13 @@ dependencies:
     - seaborn
     - xlwings
     - openpyxl
-    - wheel
+    - build
     - meteodata-lab[regrid]~=0.4
     - earthkit-plots>=0.3,<0.4
     - nbconvert>=7.16.6
     - nbformat>=5.10.4
+    - fastparquet
+    - https://github.com/JosePedroMatos/Tethys-meteoraster/releases/latest/download/meteoraster-2.0-py3-none-any.whl
+    - pytest
+    - pytest-cov
+    - azure-storage-blob
