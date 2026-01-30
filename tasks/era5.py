@@ -24,11 +24,15 @@ class ERA5(BaseTask):
 
         SOURCE_PARALLEL_TRANSFERS = 3
 
+        PIXEL_SIZE = 0.1
+
         CLOUD_TEMPLATE = 'test/ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
         LOCAL_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
         STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/tethys_era5_{self._variable}_%Y.%m.01.nct'
         # STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%G/tethys_era5_{self._variable}_%G.%V.nc'
         # STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/tethys_era5_{self._variable}_%Y.nc'
+
+        STORAGE_SEARCH_WINDOW = pd.DateOffset(days=40)
 
         VARIABLE_DICT = dict(
             t2m = '2m_temperature',
@@ -355,12 +359,30 @@ class ERA5_ZAMBEZI_TP(ERA5_ZAMBEZI_T2M):
     with CaptureNewVariables() as _ERA5_ZAMBEZI_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tp'
 
-        # PRODUCTION_FREQUENCY = pd.DateOffset(months=2)
-        # LEADTIMES = [pd.DateOffset(months=i) for i in range(3)]
+class ERA5_BELGIUM_T2M(ERA5):
+
+    with CaptureNewVariables() as _ERA5_BELGIUM_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        SOURCE_KML='resources/era5 belgium.kml'
+        VARIABLE='t2m'
+        ZONE='belgium'
+
+class ERA5_BELGIUM_TP(ERA5_BELGIUM_T2M):
+
+    with CaptureNewVariables() as _ERA5_BELGIUM_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tp'
 
 if __name__=='__main__':
-    era5 = ERA5_ZAMBEZI_TP(download_from_source=True, date_from='2025-05-01')
-    # era5.retrieve_and_upload()
+    import matplotlib.pyplot as plt
+    plt.ion()
+
+    era5 = ERA5_BELGIUM_T2M(download_from_source=True, date_from='2025-08-01')
+    era5.retrieve_and_upload()
+    # era5.retrieve()
+    # era5.upload_to_cloud()
+    era5.store()
+
+    era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2025-08-01')
+    era5.retrieve_and_upload()
     # era5.retrieve()
     # era5.upload_to_cloud()
     era5.store()

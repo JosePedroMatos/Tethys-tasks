@@ -427,7 +427,7 @@ class BaseTask():
                         continue
                 
                 data = self.read_local(l0)
-                axes = tuple(range(2, data.data.ndim))
+                axes = (1, 3, 4)
                 data_steps = pd.DataFrame(np.sum(np.isfinite(data.data), axis=axes)>0,
                                           index=pd.DatetimeIndex(data.production_datetime, name='production_datetime'),
                                           columns=pd.Index(data.leadtimes, name='leadtime')).stack()

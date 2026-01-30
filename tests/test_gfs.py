@@ -67,29 +67,43 @@ class TestGFSReading(unittest.TestCase):
             pcp_task = GFS_025_PCP_CAUCASUS(date_from=date_from, date_to=date_to, verbose=0, download_from_source=False)
             pcp_task.verbose = 1
 
+            # Track failures for this specific file
+            file_errors = {}
+            file_success = False
+
             # --- Try reading as T2M ---
             try:
                 mr = t2m_task.read_local(file_path)
+                self.assertIsNotNone(mr, "Read result should not be None")
                 data_shape = mr.data['data'].shape if isinstance(mr.data, dict) else mr.data.shape
+                self.assertTrue(len(data_shape) > 0, "Data shape should be valid")
                 print(f"  [T2M] SUCCESS. Shape: {data_shape}")
-                ops_success += 1
+                file_success = True
             except Exception as e:
-                # Expected failure if the file is for a different variable (e.g. Precipitation)
-                print(f"  [T2M] Skipped/Error: {e}")
+                # Store error to report if ALL attempts fail
+                file_errors['T2M'] = str(e)
+                print(f"  [T2M] (Expected if not T2M file) Error: {e}")
 
             # --- Try reading as PCP ---
-            try:
-                mr = pcp_task.read_local(file_path)
-                data_shape = mr.data['data'].shape if isinstance(mr.data, dict) else mr.data.shape
-                print(f"  [PCP] SUCCESS. Shape: {data_shape}")
-                ops_success += 1
-            except Exception as e:
-                # Expected failure if the file is for a different variable (e.g. Temperature)
-                print(f"  [PCP] Skipped/Error: {e}")
-        
-        # Assert that at least one read operation was successful across all files
-        # This ensures the test fails if valid data exists but code is broken.
-        self.assertGreater(ops_success, 0, "Failed to read any files with either T2M or PCP configurations.")
+            # Use 'if not file_success' to only try PCP if T2M failed.
+            # If you want to test both regardless, remove 'if not file_success'.
+            if not file_success:
+                try:
+                    mr = pcp_task.read_local(file_path)
+                    self.assertIsNotNone(mr, "Read result should not be None")
+                    data_shape = mr.data['data'].shape if isinstance(mr.data, dict) else mr.data.shape
+                    self.assertTrue(len(data_shape) > 0, "Data shape should be valid")
+                    print(f"  [PCP] SUCCESS. Shape: {data_shape}")
+                    file_success = True
+                except Exception as e:
+                    file_errors['PCP'] = str(e)
+                    print(f"  [PCP] (Expected if not PCP file) Error: {e}")
+            
+            # Critical: Ensure THIS file was successfully read
+            if not file_success:
+                self.fail(f"Failed to read file '{f.name}' with any configuration.\nErrors encountered: {file_errors}")
+
+            ops_success += 1
 
 if __name__ == '__main__':
     unittest.main()

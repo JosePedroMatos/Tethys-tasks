@@ -27,7 +27,7 @@ class ALARO40L_T2M(BaseTask):
 
         CLOUD_TEMPLATE = 'test/ALARO_IRM/%Y/%m/alaro40l_%Y%m%d%H.zip'
         LOCAL_PATH_TEMPLATE = 'ALARO_IRM/%Y/%m/alaro40l_%Y%m%d%H.zip'
-        STORAGE_PATH_TEMPLATE = 'ALARO_IRM/alaro40l_{self._variable}/%Y/%m/tethys_alaro40l_{self._variable}_%Y.%m.%d.nct'
+        STORAGE_PATH_TEMPLATE = 'ALARO_IRM/alaro40l_{self._variable}/%Y/tethys_alaro40l_{self._variable}_{{floor_7_days}}.nct'
         # STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%G/tethys_era5_{self._variable}_%G.%V.nc'
 
         DOWNLOAD_TEMPLATE = 'https://opendata.meteo.be/ftp/forecasts/alaro_40l/%Y%m%d%H/{file}'
@@ -44,7 +44,21 @@ class ALARO40L_T2M(BaseTask):
                              )
         VARIABLE_LIST = [i for k, i in VARIABLE_DICT.items()]
 
+        STORAGE_SEARCH_WINDOW = pd.DateOffset(days=10)
+
         VARIABLE = 't2m'
+
+    def _7_days(self, production_datetime):
+        reference = pd.Timestamp('1900-01-01')
+        step = pd.Timedelta(days=7)
+        return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
+
+    def populate(self, *args, **kwargs):
+        # Add each 7 days (floor_7_days)
+        additional_columns = {'floor_7_days': lambda x: self._7_days(x['production_datetime']),
+                              }
+
+        return super().populate(additional_columns=additional_columns, *args, **kwargs)
 
     def __download_helper(self, url: str, destination: str) -> tuple[bool, str]:
         """Download url into a system temp file and move to destination on success."""
@@ -178,7 +192,14 @@ class ALARO40L_T2M(BaseTask):
             data['longitudes'] = ds.longitude.data
             data['production_datetime'] = pd.to_datetime(np.array((ds.time.data,)))
             data['leadtimes'] = pd.to_timedelta(ds.valid_time.data-ds.time.data)
-            data['data'] = np.expand_dims(ds['unknown'].data[:, :-1, :], axis=(0, 1))
+
+            var = list(ds.data_vars)
+            if len(var)!=1:
+                raise(f'Problem with dataset vars in {variable_file} ({self.__class__.__name__})')
+
+            data['data'] = np.expand_dims(ds[var[0]].data[:, :-1, :], axis=(0, 1))
+
+        return data
     
     def read_local(self, local_file: str) -> MeteoRaster:
         '''
@@ -201,15 +222,18 @@ class ALARO40L_T2M(BaseTask):
         if self._variable == 't2m':
             data['data'] -= 273.15
             units = 'C'
-        # elif self._variable == 'tp':
-        #     data['data'] -= 273.15
-        #     units = 'C'
+        elif self._variable == 'tp':
+            data['data'] = np.diff(data['data'], axis=2)
+            data['leadtimes'] = data['leadtimes'][:-1]
+            data['data'] *= 1000
+            units = 'mm/hr'
         else:
             raise(f'Datatype {self._variable} not supported ({self.__class__.__name__})')
         
         mr = MeteoRaster(data, units=units, variable=self._variable, verbose=False)
         
         # mr.plot_mean(coastline=True, borders=True)
+        # mr.get_values_from_latlon(lon=50.3, lat=-5.4).to_clipboard(excel=True)
         
         return mr
 
@@ -219,24 +243,19 @@ class ALARO40L_TP(ALARO40L_T2M):
     '''
     with CaptureNewVariables() as _ALARO40L_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         VARIABLE = 'tp'
+        LEADTIMES = pd.timedelta_range('0h', '59h', freq='1h')
 
-class ALARO40L_CR(ALARO40L_T2M):
-    '''
-    Docstring for ALARO 40 L convective rain data
-    '''
-    with CaptureNewVariables() as _ALARO40L_CR_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
-        VARIABLE = 'cr'
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
     alaro = ALARO40L_TP(download_from_source=True, date_from='2026-01-28')
-    alaro.read_local('tests/data/ALARO/2026012900.zip')
+    # alaro.read_local('tests/data/ALARO/2026012900.zip')
     
-    # alaro.retrieve_and_upload()
+    alaro.retrieve_and_upload()
     # alaro.retrieve()
     # alaro.upload_to_cloud()
-    # alaro.store()
+    alaro.store()
 
     pass

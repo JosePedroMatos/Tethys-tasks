@@ -66,7 +66,8 @@ class GFS_025_T2M_CAUCASUS(BaseTask):
         return (leadtime // pd.Timedelta(hours=1)).astype(str).str.zfill(3)
 
     def populate(self, *args, **kwargs):
-        # Add each 7 days (day_f7)
+        # Add each 7 days (floor_7_days)
+        # Add leadtime in 03 format hours (leadtime_hours)
         additional_columns = {'floor_7_days': lambda x: self._7_days(x['production_datetime']),
                               'leadtime_hours': lambda x: self._leadtime_hours(x['leadtime']),
                               }
