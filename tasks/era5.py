@@ -285,14 +285,11 @@ class ERA5(BaseTask):
         
         if self._cumulative[self._variable]:
 
-            # self.data_index.groupby('local_file').apply(lambda x: ~x['data_exists'].all())
-            incomplete_steps = self.data_index.loc[~self.data_index['local_file_complete'], :]
-            incomplete_files = incomplete_steps['local_file'].unique().tolist()
-            for f0 in self.data_index['local_file'].unique():
-                if f0 in incomplete_files:
-                    continue
+            complete = self.data_index.groupby('local_file').all().loc[:, 'data_exists']
 
+            for f0 in complete.index[complete].tolist():
                 # All the data is available. Check .parquet
+
                 with ZipFile(f0, mode='a') as zip_file:
                     names = zip_file.namelist()
                     local_parquet = Path(f0).with_suffix('.parquet')
@@ -375,13 +372,13 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    era5 = ERA5_BELGIUM_T2M(download_from_source=True, date_from='2025-08-01')
-    era5.retrieve_and_upload()
-    # era5.retrieve()
-    # era5.upload_to_cloud()
-    era5.store()
+    # era5 = ERA5_BELGIUM_T2M(download_from_source=True, date_from='2025-08-01')
+    # era5.retrieve_and_upload()
+    # # era5.retrieve()
+    # # era5.upload_to_cloud()
+    # era5.store()
 
-    era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2025-08-01')
+    era5 = ERA5_BELGIUM_TP(download_from_source=False, date_from='2025-08-01')
     era5.retrieve_and_upload()
     # era5.retrieve()
     # era5.upload_to_cloud()
