@@ -7,7 +7,7 @@ name = "tethys-tasks"
 version = "0.1.0"
 description = "Tethys task definitions and utilities"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 license = { file = "LICENSE" }
 keywords = ["tethys", "tasks", "meteorology"]
 classifiers = [
