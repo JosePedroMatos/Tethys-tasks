@@ -1,4 +1,4 @@
-from tasks import BaseTask, CaptureNewVariables, DownloadMonitor
+from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor
 import pandas as pd
 import numpy as np
 import xarray as xr
@@ -219,7 +219,6 @@ class GFS_025_PCP_CAUCASUS(GFS_025_T2M_CAUCASUS):
     with CaptureNewVariables() as _GFS_025_PCP_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         VARIABLE = 'PRATE'
         VARIABLE_LOWER = 'pcp'
-
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt

@@ -4,8 +4,8 @@ import sys
 import json
 import os
 from dotenv import load_dotenv
-from tasks.base import BaseTask
-import tasks
+from tethys_tasks.base import BaseTask
+import tethys_tasks
 
 # Load environment variables from .env if it exists
 load_dotenv()
@@ -23,9 +23,9 @@ def main():
 
     # Get the class
     try:
-        print(tasks.__all__)
+        print(tethys_tasks.__all__)
         print(args.class_name)
-        cls = getattr(tasks, args.class_name, None)
+        cls = getattr(tethys_tasks, args.class_name, None)
         if cls is None:
             raise Exception(f'Class {args.class_name} not found.')
     except Exception as ex:

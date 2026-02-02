@@ -9,7 +9,7 @@ description = "Tethys task definitions and utilities"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { file = "LICENSE" }
-keywords = ["tethys", "tasks", "meteorology"]
+keywords = ["tethys", "tethys_tasks", "meteorology"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -38,7 +38,7 @@ py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tasks*"]
+include = ["tethys_tasks*"]
 
 [tool.setuptools.data-files]
 "resources" = ["resources/*.kml"]

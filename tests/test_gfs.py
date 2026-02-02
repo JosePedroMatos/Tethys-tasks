@@ -7,7 +7,7 @@ import warnings
 # Add parent directory to path to allow importing tasks
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tasks.gfs import GFS_025_T2M_CAUCASUS, GFS_025_PCP_CAUCASUS
+from tethys_tasks.gfs import GFS_025_T2M_CAUCASUS, GFS_025_PCP_CAUCASUS
 
 # Suppress warnings (like those from cfgrib or missing keys) for cleaner output
 warnings.filterwarnings("ignore")

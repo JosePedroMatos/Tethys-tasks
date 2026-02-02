@@ -2,7 +2,7 @@
 import pandas as pd
 import os
 from pathlib import Path
-from tasks import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor
+from tethys_tasks import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor
 from collections.abc import Iterable
 import xml.etree.ElementTree as ET
 import numpy as np

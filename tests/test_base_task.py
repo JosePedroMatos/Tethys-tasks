@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from tasks import BaseTask
+from tethys_tasks import BaseTask
 
 def test_basetask_init_default():
     bt = BaseTask()

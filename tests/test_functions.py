@@ -1,5 +1,5 @@
 import pytest
-from tasks import CaptureNewVariables
+from tethys_tasks import CaptureNewVariables
 
 def test_capture_new_variables():
     with CaptureNewVariables() as cnv:
