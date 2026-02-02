@@ -1,6 +1,19 @@
 # Tethys-tasks
 Code to run tasks associated with Tethys
 
+## Conda installation (required)
+This project is intended to be installed with Conda. Runtime dependencies are defined in environment.yml.
+
+```bash
+conda env create -f environment.yml
+conda activate tethys_tasks
+```
+
+### Build a wheel (optional)
+```bash
+python -m build
+```
+
 ## Docker Usage
 This project is designed to be run within a Docker container, typically orchestrated by an external Airflow instance.
 

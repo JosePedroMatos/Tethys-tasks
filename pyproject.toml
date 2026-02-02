@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tethys-tasks"
+version = "0.1.0"
+description = "Tethys task definitions and utilities"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+keywords = ["tethys", "tasks", "meteorology"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    # Intentionally empty: this project is distributed for Conda-only installs.
+    # Runtime dependencies are defined in environment.yml.
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "nbconvert>=7.16.6",
+    "nbformat>=5.10.4",
+    "pytest",
+    "pytest-cov",
+]
+
+[project.scripts]
+tethys-tasks = "main:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tasks*"]
+
+[tool.setuptools.data-files]
+"resources" = ["resources/*.kml"]
