@@ -157,6 +157,12 @@ class GFS_025_T2M(BaseTask):
         return downloaded
 
     def read_local(self, local_file: str) -> MeteoRaster:
+
+        data, units = self._read_local(local_file)
+        mr = MeteoRaster(data=data, units=units, variable=self._variable, verbose=False)
+        return mr
+    
+    def _read_local(self, local_file: str):
         '''
         Returns a MeteoRaster object with the data
         '''
@@ -208,14 +214,148 @@ class GFS_025_T2M(BaseTask):
 
         units = self._units[self._variable]
 
-        mr = MeteoRaster(data=data, units=units, variable=self._variable, verbose=False)
+        return data, units
 
-        return mr
+    def store(self) -> bool:
+        '''
+        Docstring for store
+        Reads the data and saves it for storage. Shall be overloaded by product-specific tasks
+        Should return a list of file paths (e.g., .parquet, .mr)
+        '''
+        
+        stored = False
+
+        self.diag('Storing...', 1)
+
+        self.diag('    Building index and checking completeness...', 2)
+        # Extend population to full storage files
+        extended_index = self.populate(self.data_index['production_datetime'].min() - self._storage_search_window,
+                              self.data_index['production_datetime'].max() + self._storage_search_window)
+        self.data_index = extended_index.loc[extended_index['stored_file'].isin(self.data_index['stored_file'].unique())]
+        self._clean_index()
+
+        # Complete index
+        self._update_index_and_completeness()
+
+        self.diag('    Storing...', 2)
+        stored_files = self.data_index.loc[~self.data_index['stored_file_complete'], 'stored_file'].unique()
+        for s0 in stored_files[::-1]:
+            # Collect data
+            data = None
+            already_stored = None
+            if Path(s0).exists():
+                self.diag(f'            Reading "{s0}" ({self.__class__.__name__})', 1)
+                data = MeteoRaster.load(s0, verbose=False)
+                already_stored = data.get_complete_index().stack()
+
+            index = self.data_index[(self.data_index['stored_file']==s0)]
+            index_existing = index.loc[self.data_index['data_exists'] & self.data_index['local_file_exists'], :]
+
+            if not index_existing.empty:
+                self.diag(f'            Reading {len(index_existing)} local files for "{s0}"', 1)
+
+                # Initialize with first file
+                # Use _read_local to get dimensions and units
+                first_row = index_existing.iloc[0]
+                d_sample, units = self._read_local(first_row['local_file'])
+                lats = d_sample['latitudes']
+                lons = d_sample['longitudes']
+                
+                # Prepare Aggregation Array
+                unique_prods = np.sort(index['production_datetime'].unique())
+                unique_leads = self._leadtimes
+                
+                # [Prod, Ens, Lead, Lat, Lon]
+                full_data = np.full((len(unique_prods), 1, len(unique_leads), len(lats), len(lons)), np.nan, dtype=np.float32)
+
+                # Mappings
+                prod_map = {pd.Timestamp(p): i for i, p in enumerate(unique_prods)}
+                lead_map = {pd.Timedelta(l): i for i, l in enumerate(unique_leads)}
+                
+                for _, row in index_existing.iterrows():
+                    # Read using existing method
+                    d_loc, _ = self._read_local(row['local_file'])
+                    
+                    # Extract the specific slice of data for this file
+                    # _read_local embeds it in the global leadtime array
+                    # We need to find the index corresponding to this file's leadtime
+                    global_lt_idx = np.searchsorted(self._leadtimes, row['leadtime'])
+                    data_slice = d_loc['data'][0, 0, global_lt_idx, :, :]
+                    
+                    # Place into aggregated array
+                    p_idx = prod_map[row['production_datetime']]
+                    l_idx = lead_map[row['leadtime']]
+                    full_data[p_idx, 0, l_idx, :, :] = data_slice
+
+                # Create MeteoRaster from aggregated data
+                data_dict = dict(data=full_data,
+                                latitudes=lats,
+                                longitudes=lons,
+                                production_datetime=unique_prods,
+                                leadtimes=unique_leads,
+                                )
+                
+                mr = MeteoRaster(data=data_dict, units=units, variable=self._variable, verbose=False)
+
+                # Crop (only once)
+                if not self.storage_bounding_box is None:
+                    mr = mr.getCropped(
+                        **{a:self.storage_bounding_box[k] for a, k in zip(['from_lat', 'to_lat', 'from_lon', 'to_lon'],
+                                                                          ['south', 'north', 'west', 'east'])})
+                
+                # Join with previously stored data
+                if data is None:
+                    data = mr
+                else:
+                    data.join(mr)
+
+            if data is None:
+                continue
+
+            # Ensure completeness (production and leadtime)
+                # Production dates
+            production_datetimes = index['production_datetime'].unique()
+            valid_production_datetimes = production_datetimes.isin(data.production_datetime)
+            if not valid_production_datetimes.all():
+                tmp = np.full([len(production_datetimes) if i==0 else data.data.shape[i] for i in range(5)], np.nan)
+                tmp[valid_production_datetimes, ...] = data.data
+                data.data = tmp 
+                data.production_datetime = production_datetimes
+
+                # Leadtimes
+            leadtimes = index['leadtime'].unique()
+            if isinstance(leadtimes[0], pd.DateOffset):
+                pass
+            else:
+                leadtimes = pd.to_timedelta(leadtimes)
+            valid_leadtimes = leadtimes.isin(data.leadtimes)
+            if not valid_leadtimes.all():
+                tmp = np.full([len(valid_leadtimes) if i==1 else data.data.shape[i] for i in range(5)], np.nan)
+                tmp[:, valid_leadtimes, ...] = data.data
+                data.data = tmp 
+                data.leadtimes = leadtimes
+
+            # Save file
+            if not already_stored is None:
+                newly_stored = data.get_complete_index().stack()
+                if (already_stored==newly_stored).all():
+                    # No changes to be saved
+                    continue
+
+            self.diag(f'            Saving "{s0}" ({self.__class__.__name__})', 1)
+            data.save(s0)
+            self.diag(f'                Done.', 1)
+            stored = True
+
+        # Update completeness
+        self._update_index_and_completeness(local=False, cloud=False)
+
+        return stored
 
 class GFS_025_T2M_CAUCASUS(GFS_025_T2M):
     with CaptureNewVariables() as _GFS_025_T2M_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         ZONE = 'caucasus'
-        STORAGE_KML='resources/gfs caucasus.kml'
+        STORAGE_KML='tethys_tasks/resources/caucasus.kml'
         VARIABLE = 'TMP'
         VARIABLE_LOWER = 'tmp'
 
@@ -227,7 +367,7 @@ class GFS_025_PCP_CAUCASUS(GFS_025_T2M_CAUCASUS):
 class GFS_025_T2M_BELGIUM(GFS_025_T2M):
     with CaptureNewVariables() as _GFS_025_T2M_BELGIUM_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         ZONE = 'belgium'
-        STORAGE_KML='resources/gfs belgium.kml'
+        STORAGE_KML='tethys_tasks/resources/belgium.kml'
         VARIABLE = 'TMP'
         VARIABLE_LOWER = 'tmp'
 
@@ -236,14 +376,51 @@ class GFS_025_PCP_BELGIUM(GFS_025_T2M_BELGIUM):
         VARIABLE = 'PRATE'
         VARIABLE_LOWER = 'pcp'
 
+class GFS_025_T2M_IBERIA(GFS_025_T2M):
+    with CaptureNewVariables() as _GFS_025_T2M_IBERIA_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        ZONE = 'iberia'
+        STORAGE_KML='tethys_tasks/resources/iberia.kml'
+        VARIABLE = 'TMP'
+        VARIABLE_LOWER = 'tmp'
+
+class GFS_025_PCP_IBERIA(GFS_025_T2M_IBERIA):
+    with CaptureNewVariables() as _GFS_025_PCP_IBERIA_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
+        VARIABLE = 'PRATE'
+        VARIABLE_LOWER = 'pcp'
+
+class GFS_025_T2M_TAJIKISTAN(GFS_025_T2M):
+    with CaptureNewVariables() as _GFS_025_T2M_TAJIKISTAN_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        ZONE = 'tajikistan'
+        STORAGE_KML='tethys_tasks/resources/tajikistan.kml'
+        VARIABLE = 'TMP'
+        VARIABLE_LOWER = 'tmp'
+
+class GFS_025_PCP_TAJIKISTAN(GFS_025_T2M_TAJIKISTAN):
+    with CaptureNewVariables() as _GFS_025_PCP_TAJIKISTAN_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
+        VARIABLE = 'PRATE'
+        VARIABLE_LOWER = 'pcp'
+
+class GFS_025_T2M_ZAMBEZI(GFS_025_T2M):
+    with CaptureNewVariables() as _GFS_025_T2M_ZAMBEZI_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        ZONE = 'zambezi'
+        STORAGE_KML='tethys_tasks/resources/zambezi.kml'
+        VARIABLE = 'TMP'
+        VARIABLE_LOWER = 'tmp'
+
+class GFS_025_PCP_ZAMBEZI(GFS_025_T2M_ZAMBEZI):
+    with CaptureNewVariables() as _GFS_025_PCP_ZAMBEZI_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
+        VARIABLE = 'PRATE'
+        VARIABLE_LOWER = 'pcp'
+
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    alaro = GFS_025_PCP_BELGIUM(download_from_source=True, date_from='2026-02-01')    
-    alaro.retrieve_and_upload()
-    # alaro.retrieve()
-    # alaro.upload_to_cloud()
-    alaro.store()
+    task = GFS_025_T2M_BELGIUM(download_from_source=False, date_from='2026-02-02')    
+    # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-02-01')    
+    # task.retrieve_and_upload()
+    # task.retrieve()
+    # task.upload_to_cloud()
+    task.store()
 
     pass

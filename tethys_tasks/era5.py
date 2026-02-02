@@ -346,8 +346,7 @@ class ERA5(BaseTask):
 class ERA5_ZAMBEZI_T2M(ERA5):
 
     with CaptureNewVariables() as _ERA5_ZAMBEZI_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='resources/era5 zambezi.kml'
-        # STORAGE_KML='resources/era5 zambezi.kml'
+        SOURCE_KML='tethys_tasks/resources/zambezi.kml'
         VARIABLE='t2m'
         ZONE='zambezi'
 
@@ -359,7 +358,7 @@ class ERA5_ZAMBEZI_TP(ERA5_ZAMBEZI_T2M):
 class ERA5_BELGIUM_T2M(ERA5):
 
     with CaptureNewVariables() as _ERA5_BELGIUM_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='resources/era5 belgium.kml'
+        SOURCE_KML='tethys_tasks/resources/belgium.kml'
         VARIABLE='t2m'
         ZONE='belgium'
 
@@ -367,6 +366,44 @@ class ERA5_BELGIUM_TP(ERA5_BELGIUM_T2M):
 
     with CaptureNewVariables() as _ERA5_BELGIUM_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tp'
+
+class ERA5_CAUCASUS_T2M(ERA5):
+
+    with CaptureNewVariables() as _ERA5_CAUCASUS_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        SOURCE_KML='tethys_tasks/resources/caucasus.kml'
+        VARIABLE='t2m'
+        ZONE='caucasus'
+
+class ERA5_CAUCASUS_TP(ERA5_CAUCASUS_T2M):
+
+    with CaptureNewVariables() as _ERA5_CAUCASUS_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tp'
+
+class ERA5_IBERIA_T2M(ERA5):
+
+    with CaptureNewVariables() as _ERA5_IBERIA_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        SOURCE_KML='tethys_tasks/resources/iberia.kml'
+        VARIABLE='t2m'
+        ZONE='iberia'
+
+class ERA5_IBERIA_TP(ERA5_IBERIA_T2M):
+
+    with CaptureNewVariables() as _ERA5_IBERIA_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tp'
+
+class ERA5_TAJIKISTAN_T2M(ERA5):
+
+    with CaptureNewVariables() as _ERA5_TAJIKISTAN_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        SOURCE_KML='tethys_tasks/resources/tajikistan.kml'
+        VARIABLE='t2m'
+        ZONE='tajikistan'
+
+class ERA5_TAJIKISTAN_TP(ERA5_TAJIKISTAN_T2M):
+
+    with CaptureNewVariables() as _ERA5_TAJIKISTAN_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tp'
+
+
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
