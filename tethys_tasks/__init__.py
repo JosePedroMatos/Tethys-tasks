@@ -1,12 +1,27 @@
 from .functions import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor
 from .base import BaseTask
-from .era5 import ERA5_ZAMBEZI_T2M, ERA5_ZAMBEZI_TP
-from .irm import ALARO40L_T2M, ALARO40L_TP
-from .gfs import GFS_025_T2M_CAUCASUS
+from . import era5 as _era5
+from . import gfs as _gfs
+from . import irm as _irm
 
-__all__ = ['CaptureNewVariables', 'running_in_docker', 'DownloadMonitor', 'UploadMonitor',
-           'BaseTask',
-           'ERA5_ZAMBEZI_T2M', 'ERA5_ZAMBEZI_TP',
-           'ALARO40L_T2M', 'ALARO40L_TP',
-           'GFS_025_T2M_CAUCASUS',
-           ]
+__all__ = [
+    'CaptureNewVariables',
+    'running_in_docker',
+    'DownloadMonitor',
+    'UploadMonitor',
+    'BaseTask',
+]
+
+def _export_public_classes(module):
+    public = [
+        name for name, obj in vars(module).items()
+        if isinstance(obj, type)
+        and obj.__module__ == module.__name__
+        and not name.startswith('_')
+    ]
+    for name in public:
+        globals()[name] = getattr(module, name)
+    __all__.extend(public)
+
+for _module in (_era5, _irm, _gfs):
+    _export_public_classes(_module)

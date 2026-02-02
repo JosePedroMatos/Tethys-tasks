@@ -7,6 +7,7 @@ from collections.abc import Iterable
 import xml.etree.ElementTree as ET
 import numpy as np
 from meteoraster import MeteoRaster
+import importlib.resources as importlib_resources
 
 from azure.storage.blob import BlobServiceClient
 from azure.core.credentials import AzureSasCredential
@@ -573,8 +574,17 @@ class BaseTask():
         def mrounddown(x, multiple):
             return np.round(np.floor(x / multiple) * multiple, 6)
         
-        tree = ET.parse(kml_file)
-        root = tree.getroot()
+        kml_path = Path(kml_file)
+        if kml_path.exists():
+            tree = ET.parse(kml_path)
+            root = tree.getroot()
+        else:
+            resource_name = kml_path.name
+            try:
+                with importlib_resources.open_text("tethys_tasks.resources", resource_name) as handle:
+                    root = ET.fromstring(handle.read())
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(f'KML file not found: {kml_file}') from exc
         ns = {'kml': 'http://www.opengis.net/kml/2.2'}
 
         latitudes = []

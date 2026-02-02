@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tethys-tasks"
-version = "0.1.0"
+version = "0.1.1"
 description = "Tethys task definitions and utilities"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -40,5 +40,5 @@ py-modules = ["main"]
 where = ["."]
 include = ["tethys_tasks*"]
 
-[tool.setuptools.data-files]
-"resources" = ["resources/*.kml"]
+[tool.setuptools.package-data]
+"tethys_tasks.resources" = ["*.kml"]

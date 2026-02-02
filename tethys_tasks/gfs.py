@@ -12,13 +12,14 @@ import numpy as np
 from zipfile import ZipFile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
+from typing import Tuple
 
-class GFS_025_T2M_CAUCASUS(BaseTask):
+class GFS_025_T2M(BaseTask):
     '''
     Docstring for GFS 0.25 air temperature data for the caucasus region
     '''
 
-    with CaptureNewVariables() as _GFS_025_T2M_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+    with CaptureNewVariables() as _GFS_025_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         PUBLICATION_LATENCY = pd.Timedelta(hours=8)
         PUBLICATION_MEMORY = pd.Timedelta(days=10)
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=24)
@@ -52,10 +53,10 @@ class GFS_025_T2M_CAUCASUS(BaseTask):
                      SNOD='unknown',
                      )
 
-        ZONE = 'caucasus'
-        STORAGE_KML='resources/gfs caucasus.kml'
-        VARIABLE = 'TMP'
-        VARIABLE_LOWER = 'tmp'
+        ZONE = ''
+        STORAGE_KML=''
+        VARIABLE = ''
+        VARIABLE_LOWER = ''
 
     def _7_days(self, production_datetime):
         reference = pd.Timestamp('1900-01-01')
@@ -74,7 +75,7 @@ class GFS_025_T2M_CAUCASUS(BaseTask):
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
 
-    def __download_helper(self, url: str, destination: str) -> tuple[bool, str]:
+    def __download_helper(self, url: str, destination: str) -> Tuple[bool, str]:
         """Download url into a system temp file and move to destination on success."""
 
         dest_path = Path(destination)
@@ -135,9 +136,9 @@ class GFS_025_T2M_CAUCASUS(BaseTask):
         url_template = 'https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?file=gfs.t%Hz.pgrb2.0p25.f{{leadtime_hours}}&lev_10_m_above_ground=on&lev_2_m_above_ground=on&lev_surface=on&var_CPOFP=on&var_DPT=on&var_PRATE=on&var_RH=on&var_SNOD=on&var_SOILW=on&var_SUNSD=on&var_TCDC=on&var_TMP=on&var_UGRD=on&var_VGRD=on&var_WEASD=on&leftlon=0&rightlon=360&toplat=90&bottomlat=-90&dir=%%2Fgfs.%Y%m%d%%2F%H%%2Fatmos'
 
         url_template = url_template.format(self=self)
-        to_download['url'] = to_download['production_datetime'].dt.strftime(url_template)
+        to_download.loc[:, 'url'] = to_download['production_datetime'].dt.strftime(url_template)
         if '{' in url_template:
-            to_download['url'] = to_download.apply(lambda x: x['url'].format(**x.to_dict()), axis=1)
+            to_download.loc[:, 'url'] = to_download.apply(lambda x: x['url'].format(**x.to_dict()), axis=1)
 
         self.diag(f'        Downloading ({self._source_parallel_transfers} threads).', 1)
         downloaded = False
@@ -211,12 +212,27 @@ class GFS_025_T2M_CAUCASUS(BaseTask):
 
         return mr
 
-class GFS_025_PCP_CAUCASUS(GFS_025_T2M_CAUCASUS):
-    '''
-    Docstring for GFS 0.25 air temperature data for the caucasus region
-    '''
+class GFS_025_T2M_CAUCASUS(GFS_025_T2M):
+    with CaptureNewVariables() as _GFS_025_T2M_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        ZONE = 'caucasus'
+        STORAGE_KML='resources/gfs caucasus.kml'
+        VARIABLE = 'TMP'
+        VARIABLE_LOWER = 'tmp'
 
-    with CaptureNewVariables() as _GFS_025_PCP_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+class GFS_025_PCP_CAUCASUS(GFS_025_T2M_CAUCASUS):
+    with CaptureNewVariables() as _GFS_025_PCP_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
+        VARIABLE = 'PRATE'
+        VARIABLE_LOWER = 'pcp'
+
+class GFS_025_T2M_BELGIUM(GFS_025_T2M):
+    with CaptureNewVariables() as _GFS_025_T2M_BELGIUM_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        ZONE = 'belgium'
+        STORAGE_KML='resources/gfs belgium.kml'
+        VARIABLE = 'TMP'
+        VARIABLE_LOWER = 'tmp'
+
+class GFS_025_PCP_BELGIUM(GFS_025_T2M_BELGIUM):
+    with CaptureNewVariables() as _GFS_025_PCP_BELGIUM_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
         VARIABLE = 'PRATE'
         VARIABLE_LOWER = 'pcp'
 
@@ -224,7 +240,7 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    alaro = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2026-01-29')    
+    alaro = GFS_025_PCP_BELGIUM(download_from_source=True, date_from='2026-02-01')    
     alaro.retrieve_and_upload()
     # alaro.retrieve()
     # alaro.upload_to_cloud()

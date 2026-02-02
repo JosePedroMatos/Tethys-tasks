@@ -11,6 +11,7 @@ import numpy as np
 from zipfile import ZipFile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
+from typing import Tuple
 
 class ALARO40L_T2M(BaseTask):
     '''
@@ -60,7 +61,7 @@ class ALARO40L_T2M(BaseTask):
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
 
-    def __download_helper(self, url: str, destination: str) -> tuple[bool, str]:
+    def __download_helper(self, url: str, destination: str) -> Tuple[bool, str]:
         """Download url into a system temp file and move to destination on success."""
 
         dest_path = Path(destination)
