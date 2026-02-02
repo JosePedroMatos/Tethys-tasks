@@ -1,4 +1,4 @@
-from tasks import BaseTask, CaptureNewVariables, DownloadMonitor
+from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor
 import pandas as pd
 import xarray as xr
 from pathlib import Path
