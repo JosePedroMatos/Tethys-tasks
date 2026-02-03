@@ -251,8 +251,9 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
+    # alaro = ALARO40L_T2M(download_from_source=True, date_from='2026-01-28')
     alaro = ALARO40L_TP(download_from_source=True, date_from='2026-01-28')
-    # alaro.read_local('tests/data/ALARO/2026012900.zip')
+    # mr = alaro.read_local('tests/data/ALARO/2026012900.zip')
     
     alaro.retrieve_and_upload()
     # alaro.retrieve()

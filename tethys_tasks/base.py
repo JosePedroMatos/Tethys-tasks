@@ -21,7 +21,7 @@ class CompletenessIndex():
 
         self.folder.mkdir(exist_ok=True, parents=True)
         
-        self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete')
+        self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete', dtype=float)
 
         self.read()
         self.check_existance()

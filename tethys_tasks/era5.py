@@ -409,16 +409,13 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    # era5 = ERA5_BELGIUM_T2M(download_from_source=True, date_from='2025-08-01')
+    # era5 = ERA5_BELGIUM_T2M(download_from_source=False, date_from='2025-08-01')
+    # era5 = ERA5_BELGIUM_TP(download_from_source=False, date_from='2025-08-01')
     # era5.retrieve_and_upload()
-    # # era5.retrieve()
-    # # era5.upload_to_cloud()
-    # era5.store()
-
-    era5 = ERA5_BELGIUM_TP(download_from_source=False, date_from='2025-08-01')
-    era5.retrieve_and_upload()
     # era5.retrieve()
     # era5.upload_to_cloud()
-    era5.store()
+    # era5.store()
 
+    # mr = MeteoRaster.load(r'C:\tethys-tasks storage test\ERA5_T2M\era5_t2m_belgium\2026\tethys_era5_t2m_2026.01.01.nct')
+    # mr.plot_mean(coastline=True, borders=True)
     pass
