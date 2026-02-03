@@ -259,4 +259,7 @@ if __name__=='__main__':
     # alaro.upload_to_cloud()
     alaro.store()
 
+    # stored_files = alaro.data_index['stored_file'].unique()
+    # mr = MeteoRaster.load(stored_files[-1])
+    # mr.plot_mean(coastline=True, borders=True)
     pass

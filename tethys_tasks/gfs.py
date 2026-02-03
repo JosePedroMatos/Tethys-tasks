@@ -199,6 +199,8 @@ class GFS_025_T2M(BaseTask):
             
                 if self._variable=='TMP':
                     data_ -= 273.15
+                if self._variable=='PRATE':
+                    data_ *= 3*3600
 
         data = np.full([1, 1, self._leadtimes.shape[0]] + list(data_.shape), np.NaN)
         lt_idx = np.searchsorted(self._leadtimes, leadtimes[0])
@@ -249,7 +251,7 @@ class GFS_025_T2M(BaseTask):
                 already_stored = data.get_complete_index().stack()
 
             index = self.data_index[(self.data_index['stored_file']==s0)]
-            index_existing = index.loc[self.data_index['data_exists'] & self.data_index['local_file_exists'], :]
+            index_existing = index.loc[self.data_index['data_exists'] & self.data_index['local_file_exists'], :].copy()
 
             if not index_existing.empty:
                 self.diag(f'            Reading {len(index_existing)} local files for "{s0}"', 1)
@@ -272,42 +274,51 @@ class GFS_025_T2M(BaseTask):
                 prod_map = {pd.Timestamp(p): i for i, p in enumerate(unique_prods)}
                 lead_map = {pd.Timedelta(l): i for i, l in enumerate(unique_leads)}
                 
-                for _, row in index_existing.iterrows():
-                    # Read using existing method
-                    d_loc, _ = self._read_local(row['local_file'])
-                    
-                    # Extract the specific slice of data for this file
-                    # _read_local embeds it in the global leadtime array
-                    # We need to find the index corresponding to this file's leadtime
-                    global_lt_idx = np.searchsorted(self._leadtimes, row['leadtime'])
-                    data_slice = d_loc['data'][0, 0, global_lt_idx, :, :]
-                    
-                    # Place into aggregated array
-                    p_idx = prod_map[row['production_datetime']]
-                    l_idx = lead_map[row['leadtime']]
-                    full_data[p_idx, 0, l_idx, :, :] = data_slice
-
-                # Create MeteoRaster from aggregated data
-                data_dict = dict(data=full_data,
-                                latitudes=lats,
-                                longitudes=lons,
-                                production_datetime=unique_prods,
-                                leadtimes=unique_leads,
-                                )
+                index_existing.set_index(['production_datetime', 'leadtime'], drop=False, inplace=True)
+                index_existing['already_stored'] = False
+                index_existing.loc[already_stored[already_stored].index, 'already_stored'] = True
+                index_existing.set_index(['idx'], drop=False, inplace=True)
                 
-                mr = MeteoRaster(data=data_dict, units=units, variable=self._variable, verbose=False)
+                index_existing = index_existing.loc[~index_existing['already_stored'], :]
 
-                # Crop (only once)
-                if not self.storage_bounding_box is None:
-                    mr = mr.getCropped(
-                        **{a:self.storage_bounding_box[k] for a, k in zip(['from_lat', 'to_lat', 'from_lon', 'to_lon'],
-                                                                          ['south', 'north', 'west', 'east'])})
-                
-                # Join with previously stored data
-                if data is None:
-                    data = mr
-                else:
-                    data.join(mr)
+                if index_existing.shape[0]>0:
+                    for _, row in index_existing.iterrows():
+
+                        # Read using existing method
+                        d_loc, _ = self._read_local(row['local_file'])
+                        
+                        # Extract the specific slice of data for this file
+                        # _read_local embeds it in the global leadtime array
+                        # We need to find the index corresponding to this file's leadtime
+                        global_lt_idx = np.searchsorted(self._leadtimes, row['leadtime'])
+                        data_slice = d_loc['data'][0, 0, global_lt_idx, :, :]
+                        
+                        # Place into aggregated array
+                        p_idx = prod_map[row['production_datetime']]
+                        l_idx = lead_map[row['leadtime']]
+                        full_data[p_idx, 0, l_idx, :, :] = data_slice
+
+                    # Create MeteoRaster from aggregated data
+                    data_dict = dict(data=full_data,
+                                    latitudes=lats,
+                                    longitudes=lons,
+                                    production_datetime=unique_prods,
+                                    leadtimes=unique_leads,
+                                    )
+                    
+                    mr = MeteoRaster(data=data_dict, units=units, variable=self._variable, verbose=False)
+
+                    # Crop (only once)
+                    if not self.storage_bounding_box is None:
+                        mr = mr.get_cropped(
+                            **{a:self.storage_bounding_box[k] for a, k in zip(['from_lat', 'to_lat', 'from_lon', 'to_lon'],
+                                                                            ['south', 'north', 'west', 'east'])})
+                    
+                    # Join with previously stored data
+                    if data is None:
+                        data = mr
+                    else:
+                        data.join(mr)
 
             if data is None:
                 continue
@@ -416,9 +427,9 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = GFS_025_T2M_BELGIUM(download_from_source=False, date_from='2026-02-02')    
+    task = GFS_025_T2M_BELGIUM(download_from_source=False, date_from='2026-02-01')    
     # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-02-01')    
-    # task.retrieve_and_upload()
+    task.retrieve_and_upload()
     # task.retrieve()
     # task.upload_to_cloud()
     task.store()
