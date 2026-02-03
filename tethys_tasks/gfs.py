@@ -10,7 +10,7 @@ import urllib.request
 from meteoraster import MeteoRaster
 import numpy as np
 from zipfile import ZipFile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 from uuid import uuid4
 from typing import Tuple
 
@@ -26,6 +26,7 @@ class GFS_025_T2M(BaseTask):
         LEADTIMES = pd.timedelta_range('0h', '384h', freq='3h')
 
         SOURCE_PARALLEL_TRANSFERS = 1
+        LOCAL_READ_PROCESSES = 2
 
         CLOUD_TEMPLATE = 'test/NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
         LOCAL_PATH_TEMPLATE = 'NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
@@ -104,7 +105,8 @@ class GFS_025_T2M(BaseTask):
                 with os.fdopen(fd, 'wb') as handle:
                     shutil.copyfileobj(response, handle)
 
-            temp_file.replace(dest_path)
+            shutil.move(str(temp_file), str(dest_path))
+
             return True, str(dest_path)
         except Exception as ex:
             if fd is not None:
@@ -158,17 +160,32 @@ class GFS_025_T2M(BaseTask):
 
     def read_local(self, local_file: str) -> MeteoRaster:
 
-        data, units = self._read_local(local_file)
+        self.diag(f'            Reading "{local_file}" ({self.__class__.__name__})', 1)
+
+        data, units = self._read_local(
+            local_file,
+            self._variable,
+            self._backend_kwargs,
+            self._grib_variable,
+            self._leadtimes,
+            self._units,
+        )
         mr = MeteoRaster(data=data, units=units, variable=self._variable, verbose=False)
         return mr
     
-    def _read_local(self, local_file: str):
+    @staticmethod
+    def _read_local(
+        local_file: str,
+        variable: str,
+        backend_kwargs: dict,
+        grib_variable: dict,
+        leadtimes: pd.TimedeltaIndex | None = None,
+        units: dict | None = None,
+        return_slice_only: bool = False,
+    ):
         '''
-        Returns a MeteoRaster object with the data
+        Returns a MeteoRaster-compatible data dict (and units) or a data slice.
         '''
-        
-        self.diag(f'            Reading "{local_file}" ({self.__class__.__name__})', 1)
-
 
         with open(local_file, "rb") as f:
             tmp = f.read(4)
@@ -178,45 +195,58 @@ class GFS_025_T2M(BaseTask):
             file_type = 'grib'
         else:
             raise Exception(f'Unknown file type in GFS "{local_file}": "{tmp}"')
-        
 
         if file_type=='netcdf':
             with xr.open_dataset(local_file, engine='netcdf4') as ds:
                 raise Exception('NetCDF support to be checked')
                 latitudes = ds.lat.data
                 longitudes = ds.lon.data
-                production_datetimes = np.array(pd.to_datetime(ds.productionDatetimes.data))
-                leadtimes = pd.arrays.TimedeltaArray._from_sequence([pd.Timedelta(hours=ds.leadtimes.data[0]/1E9/3600)])
-                data_ = ds[self._variable][...].data
+                production_datetime = np.array(pd.to_datetime(ds.productionDatetimes.data))
+                leadtimes_local = pd.arrays.TimedeltaArray._from_sequence([pd.Timedelta(hours=ds.leadtimes.data[0]/1E9/3600)])
+                data_ = ds[variable][...].data
         elif file_type=='grib':
-            with xr.open_dataset(local_file, engine='cfgrib', **self._backend_kwargs[self._variable]) as ds:
+            with xr.open_dataset(local_file, engine='cfgrib', **backend_kwargs[variable]) as ds:
                 latitudes = ds.latitude.data
                 longitudes = ds.longitude.data
                 production_datetime = pd.to_datetime(np.expand_dims(ds.time.data, 0))
-                leadtimes = pd.to_timedelta(pd.to_datetime(np.expand_dims(ds.valid_time.data, 0))-production_datetime[0])
-                
-                data_ = ds[self._grib_variable[self._variable]][...].data
-            
-                if self._variable=='TMP':
+                leadtimes_local = pd.to_timedelta(pd.to_datetime(np.expand_dims(ds.valid_time.data, 0))-production_datetime[0])
+
+                data_ = np.array(ds[grib_variable[variable]][...].values)
+
+                if variable=='TMP':
                     data_ -= 273.15
-                if self._variable=='PRATE':
+                if variable=='PRATE':
                     data_ *= 3*3600
 
-        data = np.full([1, 1, self._leadtimes.shape[0]] + list(data_.shape), np.NaN)
-        lt_idx = np.searchsorted(self._leadtimes, leadtimes[0])
-        data[0, 0, lt_idx, ...] = data_
-        leadtimes = self._leadtimes
+        if return_slice_only:
+            return data_
 
-        data=dict(data=data,
+        if leadtimes is None or units is None:
+            raise Exception('leadtimes and units are required unless return_slice_only=True')
+
+        data = np.full([1, 1, leadtimes.shape[0]] + list(data_.shape), np.NaN)
+        lt_idx = np.searchsorted(leadtimes, leadtimes_local[0])
+        data[0, 0, lt_idx, ...] = data_
+        leadtimes = leadtimes
+
+        data = dict(data=data,
                   latitudes=latitudes,
                   longitudes=longitudes,
                   production_datetime=production_datetime,
                   leadtimes=leadtimes,
                   )
 
-        units = self._units[self._variable]
+        units = units[variable]
 
         return data, units
+
+    def retrieve_and_upload(self, *args, **kwargs) -> bool:
+        '''
+        Assumes local files are complete
+        '''
+        self._update_completeness(stored=False, local=True, thorough_local=False)
+
+        return super().retrieve_and_upload(*args, **kwargs)
 
     def store(self) -> bool:
         '''
@@ -259,7 +289,14 @@ class GFS_025_T2M(BaseTask):
                 # Initialize with first file
                 # Use _read_local to get dimensions and units
                 first_row = index_existing.iloc[0]
-                d_sample, units = self._read_local(first_row['local_file'])
+                d_sample, units = self._read_local(
+                    first_row['local_file'],
+                    self._variable,
+                    self._backend_kwargs,
+                    self._grib_variable,
+                    self._leadtimes,
+                    self._units,
+                )
                 lats = d_sample['latitudes']
                 lons = d_sample['longitudes']
                 
@@ -276,27 +313,39 @@ class GFS_025_T2M(BaseTask):
                 
                 index_existing.set_index(['production_datetime', 'leadtime'], drop=False, inplace=True)
                 index_existing['already_stored'] = False
-                index_existing.loc[already_stored[already_stored].index, 'already_stored'] = True
+                if not already_stored is None:
+                    index_existing.loc[already_stored[already_stored].index, 'already_stored'] = True
                 index_existing.set_index(['idx'], drop=False, inplace=True)
                 
                 index_existing = index_existing.loc[~index_existing['already_stored'], :]
 
                 if index_existing.shape[0]>0:
-                    for _, row in index_existing.iterrows():
+                    read_rows = list(index_existing.itertuples(index=False))
 
-                        # Read using existing method
-                        d_loc, _ = self._read_local(row['local_file'])
-                        
-                        # Extract the specific slice of data for this file
-                        # _read_local embeds it in the global leadtime array
-                        # We need to find the index corresponding to this file's leadtime
-                        global_lt_idx = np.searchsorted(self._leadtimes, row['leadtime'])
-                        data_slice = d_loc['data'][0, 0, global_lt_idx, :, :]
-                        
-                        # Place into aggregated array
-                        p_idx = prod_map[row['production_datetime']]
-                        l_idx = lead_map[row['leadtime']]
-                        full_data[p_idx, 0, l_idx, :, :] = data_slice
+                    with ProcessPoolExecutor(max_workers=self._local_read_processes) as executor:
+                        futures = {}
+                        for row in read_rows:
+                            future = executor.submit(
+                                self._read_local,
+                                row.local_file,
+                                self._variable,
+                                self._backend_kwargs,
+                                self._grib_variable,
+                                None,
+                                None,
+                                True,
+                            )
+                            futures[future] = row
+
+                        for future in as_completed(futures):
+                            row = futures[future]
+                            self.diag(f'            Read "{row.local_file}" ({self.__class__.__name__})', 1)
+                            data_slice = future.result()
+
+                            # Place into aggregated array
+                            p_idx = prod_map[row.production_datetime]
+                            l_idx = lead_map[row.leadtime]
+                            full_data[p_idx, 0, l_idx, :, :] = data_slice
 
                     # Create MeteoRaster from aggregated data
                     data_dict = dict(data=full_data,
@@ -427,9 +476,9 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = GFS_025_T2M_BELGIUM(download_from_source=False, date_from='2026-02-01')    
-    # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-02-01')    
-    task.retrieve_and_upload()
+    task = GFS_025_T2M_BELGIUM(download_from_source=False, date_from='2026-01-01')    
+    # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-01-01')    
+    # task.retrieve_and_upload()
     # task.retrieve()
     # task.upload_to_cloud()
     task.store()

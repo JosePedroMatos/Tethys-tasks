@@ -463,7 +463,7 @@ class BaseTask():
                     stored_file=index['stored_file'],
                     )
 
-    def _update_completeness(self, stored:bool=True, local:bool=True) -> None:
+    def _update_completeness(self, stored:bool=True, local:bool=True, thorough_local:bool=True) -> None:
         '''
         Docstring for _update_completeness
         
@@ -483,10 +483,11 @@ class BaseTask():
                 to_remove = []
                 to_include = []
                 for stored_file, complete in stored_files.loc[folder, :].iterrows():
+                    stored_file_ = Path(stored_file)
                     if complete.iloc[0]:
-                        to_include.append(Path(stored_file).name)
+                        to_include.append(stored_file_.name)
                     else:
-                        to_remove.append(Path(stored_file).name)
+                        to_remove.append(stored_file_.name)
                 ci.include(to_include)
                 ci.remove(to_remove)
                 ci.write()
@@ -500,10 +501,14 @@ class BaseTask():
                 to_remove = []
                 to_include = []
                 for local_file, complete in local_files.loc[folder, :].iterrows():
+                    local_file_ = Path(local_file)
                     if complete.iloc[0]:
-                        to_include.append(Path(local_file).name)
+                        to_include.append(local_file_.name)
                     else:
-                        to_remove.append(Path(local_file).name)
+                        if not thorough_local and local_file_.exists():
+                            to_include.append(local_file_.name)
+                        else:
+                            to_remove.append(local_file_.name)
                 ci.include(to_include)
                 ci.remove(to_remove)
                 ci.write()
