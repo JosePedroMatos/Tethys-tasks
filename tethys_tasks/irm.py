@@ -172,7 +172,7 @@ class ALARO40L_T2M(BaseTask):
                                             fpath.unlink()
                                     os.close(fd_zip)
                                     tmp_zip = Path(tmp_zip_path)
-                                    tmp_zip.replace(local_file_)
+                                    shutil.move(str(tmp_zip), str(local_file_))
 
                                     self.diag(f'        Saved {local_file_.name}.', 1)
 
@@ -292,7 +292,7 @@ if __name__=='__main__':
     alaro.retrieve_and_upload()
     # alaro.retrieve()
     # alaro.upload_to_cloud()
-    # alaro.store()
+    alaro.store()
 
     # alaro._move_to_local(r'C:\Users\zepedro\Gruner AG\Outil de Gestion des barrages en Wallonie [P_PAR] - Partners only - Documents\Partners only\2 TEC_DOC\Working folder\MAJO\Tethys inputs\IRM_ALARO40')
 
