@@ -238,6 +238,40 @@ class ALARO40L_T2M(BaseTask):
         
         return mr
 
+    def _move_to_local(self, base_folder: str) -> None:
+        '''
+        Move files in a base_folder to their correct local storage location.
+        Replace files if they already exist.
+        '''
+        base_path = Path(base_folder)
+        if not base_path.exists():
+            self.diag(f'        Base folder not found: {base_path}.', 1)
+            return
+
+        zip_files = list(base_path.rglob('*.zip'))
+        if len(zip_files) == 0:
+            self.diag(f'        No files to move in {base_path}.', 1)
+            return
+
+        for zip_file in zip_files:
+            try:
+                production_datetime = pd.to_datetime(zip_file.stem, format='%Y%m%d%H')
+            except Exception:
+                self.diag(f'        Skipping unrecognized file: {zip_file.name}.', 1)
+                continue
+
+            local_rel = production_datetime.strftime(self._local_path_template)
+            if '{' in self._local_path_template:
+                local_rel = local_rel.format(production_datetime=production_datetime)
+
+            local_file = Path(self._local_storage_folder) / local_rel
+            if zip_file.resolve() == local_file.resolve():
+                continue
+
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(zip_file), str(local_file))
+            self.diag(f'        Moved {zip_file.name} -> {local_file}.', 1)
+
 class ALARO40L_TP(ALARO40L_T2M):
     '''
     Docstring for ALARO 40 L total precipitation data
@@ -251,14 +285,16 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    # alaro = ALARO40L_T2M(download_from_source=True, date_from='2026-01-28')
-    alaro = ALARO40L_TP(download_from_source=True, date_from='2026-01-28')
+    alaro = ALARO40L_T2M(download_from_source=True, date_from='2025-10-01')
+    # alaro = ALARO40L_TP(download_from_source=True, date_from='2025-10-01')
     # mr = alaro.read_local('tests/data/ALARO/2026012900.zip')
     
     alaro.retrieve_and_upload()
     # alaro.retrieve()
     # alaro.upload_to_cloud()
-    alaro.store()
+    # alaro.store()
+
+    # alaro._move_to_local(r'C:\Users\zepedro\Gruner AG\Outil de Gestion des barrages en Wallonie [P_PAR] - Partners only - Documents\Partners only\2 TEC_DOC\Working folder\MAJO\Tethys inputs\IRM_ALARO40')
 
     # stored_files = alaro.data_index['stored_file'].unique()
     # mr = MeteoRaster.load(stored_files[-1])
