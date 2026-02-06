@@ -289,10 +289,12 @@ if __name__=='__main__':
     # alaro = ALARO40L_TP(download_from_source=True, date_from='2025-10-01')
     # mr = alaro.read_local('tests/data/ALARO/2026012900.zip')
     
-    alaro.retrieve_and_upload()
+    alaro.retrieve_store_and_upload()
+
+    # alaro.retrieve_and_upload()
     # alaro.retrieve()
     # alaro.upload_to_cloud()
-    alaro.store()
+    # alaro.store()
 
     # alaro._move_to_local(r'C:\Users\zepedro\Gruner AG\Outil de Gestion des barrages en Wallonie [P_PAR] - Partners only - Documents\Partners only\2 TEC_DOC\Working folder\MAJO\Tethys inputs\IRM_ALARO40')
 

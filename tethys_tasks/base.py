@@ -736,10 +736,6 @@ class BaseTask():
         if self.verbose >= verbose:
             print(msg)
 
-    def retrieve_and_upload(self) -> None:
-        self.retrieve()
-        self.upload_to_cloud()
-
     def store(self) -> bool:
         '''
         Docstring for store
@@ -835,7 +831,16 @@ class BaseTask():
         self._update_index_and_completeness(local=False, cloud=False)
 
         return stored
-    
+        
+    def retrieve_and_upload(self) -> None:
+        self.retrieve()
+        self.upload_to_cloud()
+
+    def retrieve_store_and_upload(self) -> None:
+        self.retrieve()
+        self.store()
+        self.upload_to_cloud()
+
     def _download_from_source(self) -> bool:
         '''
         To be overloaded for all classes

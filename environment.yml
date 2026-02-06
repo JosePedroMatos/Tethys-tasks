@@ -35,6 +35,7 @@ dependencies:
   - cartopy
   - ipykernel
   - rasterio
+  - fastparquet
   - pip
   - pip:
     - BeautifulSoup4
@@ -46,7 +47,6 @@ dependencies:
     - earthkit-plots>=0.3,<0.4
     - nbconvert>=7.16.6
     - nbformat>=5.10.4
-    - fastparquet
     - https://github.com/JosePedroMatos/Tethys-meteoraster/releases/latest/download/meteoraster-2.0-py3-none-any.whl
     - pytest
     - pytest-cov
