@@ -36,6 +36,7 @@ dependencies:
   - ipykernel
   - rasterio
   - fastparquet
+  - h5netcdf
   - pip
   - pip:
     - BeautifulSoup4

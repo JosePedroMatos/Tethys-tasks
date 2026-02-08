@@ -33,6 +33,7 @@ class GFS_025_T2M(BaseTask):
         STORAGE_PATH_TEMPLATE = 'NOAA_GFS_0.25/gfs_{self._variable_lower}_{self._zone}/%Y/tethys_NOAA_GFS_0.25_{{floor_7_days}}.nct'
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=10)
+        ASSUME_LOCAL_COMPLETE = True
 
         PIXEL_SIZE = 0.25
 
@@ -77,7 +78,9 @@ class GFS_025_T2M(BaseTask):
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
 
     def __download_helper(self, url: str, destination: str) -> Tuple[bool, str]:
-        """Download url into a system temp file and move to destination on success."""
+        '''
+        Download url into a system temp file and move to destination on success.
+        '''
 
         dest_path = Path(destination)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,14 +243,6 @@ class GFS_025_T2M(BaseTask):
 
         return data, units
 
-    def retrieve_and_upload(self, *args, **kwargs) -> bool:
-        '''
-        Assumes local files are complete
-        '''
-        self._update_completeness(stored=False, local=True, thorough_local=False)
-
-        return super().retrieve_and_upload(*args, **kwargs)
-
     def store(self) -> bool:
         '''
         Docstring for store
@@ -314,7 +309,7 @@ class GFS_025_T2M(BaseTask):
                 index_existing.set_index(['production_datetime', 'leadtime'], drop=False, inplace=True)
                 index_existing['already_stored'] = False
                 if not already_stored is None:
-                    index_existing.loc[already_stored[already_stored].index, 'already_stored'] = True
+                    index_existing.loc[index_existing.index.intersection(already_stored[already_stored].index), 'already_stored'] = True
                 index_existing.set_index(['idx'], drop=False, inplace=True)
                 
                 index_existing = index_existing.loc[~index_existing['already_stored'], :]
@@ -476,11 +471,14 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = GFS_025_T2M_BELGIUM(download_from_source=False, date_from='2026-01-01')    
+    # task = GFS_025_T2M_BELGIUM(download_from_source=True, date_from='2026-02-01')
+    task = GFS_025_PCP_BELGIUM(download_from_source=True, date_from='2026-02-01')
+
+    task.retrieve_store_and_upload()
+
     # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-01-01')    
     # task.retrieve_and_upload()
     # task.retrieve()
     # task.upload_to_cloud()
-    task.store()
 
     pass

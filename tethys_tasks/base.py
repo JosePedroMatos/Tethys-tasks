@@ -98,6 +98,8 @@ class BaseTask():
         SOURCE_PARALLEL_TRANSFERS = 1
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(months=14)
+        ASSUME_LOCAL_COMPLETE = False
+
 
         VARIABLE=''
         SOURCE_KML = ''
@@ -109,7 +111,8 @@ class BaseTask():
         LOCAL_PATH_TEMPLATE = f'ERA5_{VARIABLE.upper()}/era5_{VARIABLE}_{ZONE}/%Y/era5_{VARIABLE}_%Y.%m.zip'
         STORAGE_PATH_TEMPLATE = f'ERA5_{VARIABLE.upper()}/era5_{VARIABLE}_{ZONE}/%Y/tethys_era5_{VARIABLE}_%Y.%m.01.mr'
 
-        DATE_FROM = '2021-04-15'
+        DATE_FROM = (pd.Timestamp.utcnow() - pd.Timedelta('7d')).strftime('%Y-%m-%d %H:%M:%S') #'2021-04-15'
+        FAIL_IF_OLDER = pd.Timedelta('36h')
 
     def __init__(self, download_from_source=False, date_from:str='', date_to:str='', verbose=2, *args, **kwargs):
         '''
@@ -296,7 +299,7 @@ class BaseTask():
 
         return index
 
-    def retrieve(self, *args, **kwargs):
+    def retrieve(self, verify:bool=True, *args, **kwargs) -> bool:
         '''
         Docstring for retrieve
         
@@ -319,6 +322,40 @@ class BaseTask():
         self._update_index_and_completeness(stored=False, cloud=False)
 
         self.diag('    Done retrieving.', 1)
+
+        if verify:
+            self._check_cutoff()
+
+        return downloaded
+
+    def _check_cutoff(self, issue_error:bool=True) -> bool:
+        '''
+        Checks if data exists and is recent enough based on a predefined cutoff period.
+        Args:
+            issue_error (bool): If True, raises an exception if data is missing or outdated.
+        Returns:
+            bool: True if data exists and is within the cutoff period, False otherwise.
+        Raises:
+            Exception: If issue_error is True and no data exists or data is older than the cutoff.
+        '''
+        
+        success = True
+
+        data_exists = self.data_index[['production_datetime', 'data_exists']].groupby('production_datetime').all()
+        data_exists = data_exists.loc[data_exists.values].index
+        if data_exists.shape[0]==0:
+            success = False
+            if issue_error:
+                raise Exception(f'No data exists for the period ({self.__class__.__name__}).')
+        else:
+            last_date = data_exists[-1]
+            cutoff_date = pd.Timestamp.utcnow().tz_localize(None) - self._fail_if_older
+            if last_date<=cutoff_date:
+                success = False
+                if issue_error:
+                    raise Exception(f'No recent data exists ({self.__class__.__name__}). Last production: {last_date.strftime("%Y-%m-%d %H:%M:%S")}.')
+
+        return success
 
     def _check_existing_files(self, stored:bool=True, local:bool=True, cloud:bool=True) -> None:
         '''
@@ -361,7 +398,7 @@ class BaseTask():
             self.data_index.loc[:, 'local_file_exists'] = False
             for f0 in local_files:
                 self.data_index.loc[self.data_index['local_file']==f0, 'local_file_exists'] = Path(f0).exists()
-                
+
             for folder in set([Path(f).parent for f in local_files]):
                 ci = CompletenessIndex(folder)
                 for name in ci.get_complete():
@@ -375,7 +412,7 @@ class BaseTask():
 
         # Cloud files
         if cloud:
-            cloud_files = self.data_index.loc[~self.data_index['stored_file_exists'] & ~self.data_index['local_file_exists'], 'cloud_file'].unique()
+            cloud_files = self.data_index.loc[~self.data_index['stored_file_complete'] & ~self.data_index['local_file_complete'], 'cloud_file'].unique()
             self.data_index.loc[:, 'cloud_file_exists'] = False
             cloud_files_exist = self._check_cloud(cloud_files)
             for f0, exists in zip(cloud_files, cloud_files_exist):
@@ -389,6 +426,7 @@ class BaseTask():
 
         if check_files:
             self._check_existing_files(stored=stored, local=local, cloud=cloud, **kwargs)
+            # data_exists = self.data_index[['production_datetime', 'data_exists']].groupby('production_datetime').all()
 
         self.data_index.set_index(['production_datetime', 'leadtime'], append=False, drop=False, inplace=True)
 
@@ -401,6 +439,7 @@ class BaseTask():
             for s0 in stored_files[::-1]:
                 if not thorough:
                     idx = self.data_index['stored_file']==s0
+                    idx = idx.loc[idx].index
                     if self.data_index.loc[idx, 'stored_file_complete'].all():
                         self.data_index.loc[idx, 'data_exists'] = True
                         continue
@@ -422,8 +461,12 @@ class BaseTask():
             local_files = self.data_index.loc[self.data_index['local_file_exists'], 'local_file'].unique()
             for l0 in local_files[::-1]:
                 idx = self.data_index['local_file']==l0
-                if not thorough:
-                    if self.data_index.loc[idx, 'local_file_complete'].all():
+                idx = idx.loc[idx].index
+                if not thorough or self._assume_local_complete:
+                    if self._assume_local_complete and self.data_index.loc[idx, 'local_file_exists'].all():
+                        self.data_index.loc[idx, 'data_exists'] = True
+                        continue
+                    elif self.data_index.loc[idx, 'local_file_complete'].all():
                         self.data_index.loc[idx, 'data_exists'] = True
                         continue
                 
@@ -832,12 +875,12 @@ class BaseTask():
 
         return stored
         
-    def retrieve_and_upload(self) -> None:
-        self.retrieve()
+    def retrieve_and_upload(self, verify:bool=True) -> None:
+        self.retrieve(verify=verify)
         self.upload_to_cloud()
 
-    def retrieve_store_and_upload(self) -> None:
-        self.retrieve()
+    def retrieve_store_and_upload(self, verify:bool=True) -> None:
+        self.retrieve(verify=verify)
         self.store()
         self.upload_to_cloud()
 

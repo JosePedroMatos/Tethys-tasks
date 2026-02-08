@@ -31,6 +31,9 @@ docker-compose run --rm tethys-tasks ERA5_ZAMBEZI_TP retrieve_and_upload
 
 
 docker-compose run --rm tethys-tasks ERA5_ZAMBEZI_TP store --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=False\": \"False\"}" 
+
+
+docker-compose run --rm tethys-tasks ALARO40L_T2M retrieve_and_upload --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=True\": \"True\"}"
 ```
 
 ### Run a specific class function ("real-time code")

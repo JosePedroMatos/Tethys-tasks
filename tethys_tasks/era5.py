@@ -11,6 +11,8 @@ from meteoraster import MeteoRaster
 import numpy as np
 from zipfile import ZipFile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import random
+import string
 
 class ERA5(BaseTask):
     '''
@@ -78,8 +80,13 @@ class ERA5(BaseTask):
             if local_path_.exists():
                 local_path_.unlink()
             try:
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    with ZipFile(temp_file_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_dir)
+                    grib_files = list(Path(temp_dir).glob('*.grib'))
+                    ERA5._read_file(grib_files[0])
                 temp_file_path.replace(local_path_)
-            except OSError:
+            except OSError as ex:
                 shutil.copyfile(temp_file_path, local_path_)
                 temp_file_path.unlink(missing_ok=True)
             return ((True, local_path))
@@ -120,12 +127,13 @@ class ERA5(BaseTask):
                        'download_format': 'zip',
                        'area': [self.source_bounding_box[d] for d in ['north', 'west', 'south', 'east']],
                        'time': [f'{h:02d}:00' for h in range(24)],
+                       'nocache': ''.join(random.choice(string.digits) for _ in range(6))
                        }
 
             variables = ((options, local_path))
             info.append(variables)
 
-        self.diag('        Downloading ({self._source_parallel_transfers} threads).', 1)
+        self.diag('        Downloading (f{self._source_parallel_transfers} threads).', 1)
         downloaded = False
         results = []
         with ThreadPoolExecutor(max_workers=self._source_parallel_transfers) as executor:
@@ -140,22 +148,43 @@ class ERA5(BaseTask):
 
         return downloaded
 
-    def _read_helper(self, grib_file):
-        '''
-        Reads one grib file
-        '''
+    @staticmethod
+    def _read_file(grib_file:str, variable:str='') -> dict:
+
         data = {}
         with xr.open_dataset(grib_file, engine='cfgrib', indexpath='') as ds:
+
+            if variable=='':
+                variable_list = list(ds.data_vars)
+                if len(variable_list)>1:
+                    raise Exception('The file should not have more than one data variable.')
+                variable = variable_list[0]
+
             data['latitudes'] = ds.latitude.data
             data['longitudes'] = ds.longitude.data
             data['production_datetime'] = ds.time.data
             if isinstance(data['production_datetime'], np.datetime64):
                 data['production_datetime'] = np.array([data['production_datetime']])
-            data['data'] = ds[self._variable][...].data
+            data['data'] = ds[variable][...].data
             data['steps'] = ds.step.data
 
+        if len(data['steps'])<24:
+            raise Exception(f'The downloaded data does not have the expected number of time steps.')
+
+        return data
+
+    def _read_helper(self, grib_file:str) -> dict:
+        '''
+        Reads one grib file
+        '''
+
+        try:
+            data = self._read_file(grib_file, self._variable)
+        except Exception as ex:
+            raise Exception(str(ex)[:-1] + f' ({self.__class__.__name__}).')
+
         if self._cumulative[self._variable] and len(data['data'].shape)!=4:
-            raise Exception('The downloaded data does not have the expected number of dimensions')
+            raise Exception(f'The downloaded data does not have the expected number of dimensions {self.__class__.__name__}.')
         
         return data
 
@@ -409,9 +438,9 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    era5 = ERA5_BELGIUM_T2M(download_from_source=True, date_from='2021-01-01', source_parallel_transfers=2)
+    era5 = ERA5_BELGIUM_T2M(download_from_source=True, date_from='2025-10-01', source_parallel_transfers=2)
     # era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2021-01-01', source_parallel_transfers=2)
-    era5.retrieve_and_upload()
+    era5.retrieve_and_upload(verify=False)
     # era5.retrieve()
     # era5.upload_to_cloud()
     era5.store()

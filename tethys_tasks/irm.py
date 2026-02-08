@@ -29,7 +29,6 @@ class ALARO40L_T2M(BaseTask):
         CLOUD_TEMPLATE = 'test/ALARO_IRM/%Y/%m/alaro40l_%Y%m%d%H.zip'
         LOCAL_PATH_TEMPLATE = 'ALARO_IRM/%Y/%m/alaro40l_%Y%m%d%H.zip'
         STORAGE_PATH_TEMPLATE = 'ALARO_IRM/alaro40l_{self._variable}/%Y/tethys_alaro40l_{self._variable}_{{floor_7_days}}.nct'
-        # STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%G/tethys_era5_{self._variable}_%G.%V.nc'
 
         DOWNLOAD_TEMPLATE = 'https://opendata.meteo.be/ftp/forecasts/alaro_40l/%Y%m%d%H/{file}'
 
@@ -46,10 +45,14 @@ class ALARO40L_T2M(BaseTask):
         VARIABLE_LIST = [i for k, i in VARIABLE_DICT.items()]
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=10)
+        ASSUME_LOCAL_COMPLETE = True
 
         VARIABLE = 't2m'
+        DATE_FROM = (pd.Timestamp.utcnow() - pd.Timedelta('1d')).strftime('%Y-%m-%d %H:%M:%S') #'2021-04-15'
+        FAIL_IF_OLDER = pd.Timedelta('12h')
 
-    def _7_days(self, production_datetime):
+    @staticmethod
+    def _7_days(production_datetime):
         reference = pd.Timestamp('1900-01-01')
         step = pd.Timedelta(days=7)
         return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
@@ -237,6 +240,8 @@ class ALARO40L_T2M(BaseTask):
         # mr.get_values_from_latlon(lon=50.3, lat=-5.4).to_clipboard(excel=True)
         
         return mr
+
+
 
     def _move_to_local(self, base_folder: str) -> None:
         '''

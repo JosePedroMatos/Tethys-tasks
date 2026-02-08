@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from . import BaseTask
+from ..tasks import BaseTask
 from meteodatalab import ogd_api
 
 from earthkit.data import config
