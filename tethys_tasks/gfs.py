@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import os
 import urllib.request
+import urllib.error
+import threading
 from meteoraster import MeteoRaster
 import numpy as np
 from zipfile import ZipFile
@@ -25,7 +27,7 @@ class GFS_025_T2M(BaseTask):
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=24)
         LEADTIMES = pd.timedelta_range('0h', '384h', freq='3h')
 
-        SOURCE_PARALLEL_TRANSFERS = 1
+        SOURCE_PARALLEL_TRANSFERS = 3
         LOCAL_READ_PROCESSES = 2
 
         CLOUD_TEMPLATE = 'test/NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
@@ -77,7 +79,7 @@ class GFS_025_T2M(BaseTask):
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
 
-    def __download_helper(self, url: str, destination: str) -> Tuple[bool, str]:
+    def __download_helper(self, url: str, destination: str, production_datetime: pd.Timestamp, missing_state: dict, missing_lock: threading.Lock) -> Tuple[bool, str]:
         '''
         Download url into a system temp file and move to destination on success.
         '''
@@ -89,6 +91,11 @@ class GFS_025_T2M(BaseTask):
         temp_file = None
 
         try:
+            with missing_lock:
+                missing_min = missing_state.get('min_missing')
+            if missing_min is not None and production_datetime >= missing_min:
+                return 'Skipping', str(dest_path)
+
             request = urllib.request.Request(
                 url,
                 headers={
@@ -97,6 +104,7 @@ class GFS_025_T2M(BaseTask):
                     'Accept-Encoding': 'identity',
                 },
             )
+            # response = urllib.request.urlopen(request)
             with urllib.request.urlopen(request) as response:
                 status = response.getcode()
                 if status is not None and not (200 <= status < 300):
@@ -110,7 +118,15 @@ class GFS_025_T2M(BaseTask):
 
             shutil.move(str(temp_file), str(dest_path))
 
-            return True, str(dest_path)
+            return 'Downloaded', str(dest_path)
+        except urllib.error.HTTPError as ex:
+            if ex.code == 403:
+                # Old or future data
+                with missing_lock:
+                    current = missing_state.get('min_missing')
+                    if current is None or production_datetime < current:
+                        missing_state['min_missing'] = production_datetime
+            return 'Not found', str(dest_path)
         except Exception as ex:
             if fd is not None:
                 try:
@@ -120,7 +136,7 @@ class GFS_025_T2M(BaseTask):
             if temp_file is not None and temp_file.exists():
                 temp_file.unlink()
             print(f'        Error downloading {url} -> {dest_path}: {ex}.')
-            return False, str(dest_path)
+            return 'Failed', str(dest_path)
 
     def _download_from_source(self) -> bool:
         '''
@@ -147,14 +163,33 @@ class GFS_025_T2M(BaseTask):
 
         self.diag(f'        Downloading ({self._source_parallel_transfers} threads).', 1)
         downloaded = False
+        
+        missing_state = {'min_missing': None}
+        missing_lock = threading.Lock()
+        
         with DownloadMonitor() as monitor:
             with ThreadPoolExecutor(max_workers=self._source_parallel_transfers) as executor:
-                futures = {executor.submit(self.__download_helper, r['url'], r['local_file']): (r['local_file'], r['url']) for _, r in to_download.iterrows()}
+                futures = {
+                    executor.submit(
+                        self.__download_helper,
+                        r['url'],
+                        r['local_file'],
+                        r['production_datetime'],
+                        missing_state,
+                        missing_lock,
+                    ): r['local_file']
+                    for _, r in to_download.iterrows()
+                }
                 for future in as_completed(futures):
-                    success, downloaded_file = future.result()
-                    if success:
+                    status, downloaded_file = future.result()
+                    if status=='Downloaded':
                         msg = monitor.mark_success(downloaded_file)
                         self.diag('        ' + msg, 1)
+                        downloaded = True
+                    elif status=='Failed':
+                        self.diag(f'        Download failed for {futures[future]}.', 1)
+                    elif status=='Not found':
+                        self.diag(f'        Not found. Skipping beyond {futures[future]}.', 1)
 
         if downloaded:
             self._check_existing_data(stored=False, cloud=False)
@@ -472,7 +507,7 @@ if __name__=='__main__':
     plt.ion()
 
     # task = GFS_025_T2M_BELGIUM(download_from_source=True, date_from='2026-02-01')
-    task = GFS_025_PCP_BELGIUM(download_from_source=True, date_from='2026-02-01')
+    task = GFS_025_PCP_BELGIUM(download_from_source=True, date_from='2026-02-08')
 
     task.retrieve_store_and_upload()
 
