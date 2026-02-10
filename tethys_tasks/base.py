@@ -423,16 +423,17 @@ class BaseTask():
                 mask = pd.Series([Path(p) for p in self.data_index['local_file']]).isin(existing_files)
                 self.data_index.loc[mask, 'local_file_exists'] = True
 
-            for folder in set([Path(f).parent for f in local_files]):
-                ci = CompletenessIndex(folder)
-                for name in ci.get_complete():
-                    for l0 in local_files:
-                        local_file = None
-                        if l0.endswith(name):
-                            local_file = l0
-                            break
-                    if local_file:
-                        self.data_index.loc[self.data_index['local_file']==local_file, 'local_file_complete'] = True
+            if len(local_files) > 0:
+                local_file_map = {Path(l0).name: l0 for l0 in local_files}
+                for folder in set([Path(f).parent for f in local_files]):
+                    ci = CompletenessIndex(folder)
+                    complete_names = ci.get_complete()
+                    if not complete_names:
+                        continue
+                    complete_files = [local_file_map[n] for n in complete_names if n in local_file_map]
+                    if complete_files:
+                        mask = self.data_index['local_file'].isin(complete_files)
+                        self.data_index.loc[mask, 'local_file_complete'] = True
 
         # Cloud files
         if cloud:
@@ -487,29 +488,30 @@ class BaseTask():
         # Local files
         if local:
             local_files = self.data_index.loc[self.data_index['local_file_exists'], 'local_file'].unique()
-            for l0 in local_files[::-1]:
-                idx = self.data_index['local_file']==l0
-                idx = idx.loc[idx].index
-                if not thorough or self._assume_local_complete:
-                    if self._assume_local_complete and self.data_index.loc[idx, 'local_file_exists'].all():
-                        self.data_index.loc[idx, 'data_exists'] = True
-                        continue
-                    elif self.data_index.loc[idx, 'local_file_complete'].all():
-                        self.data_index.loc[idx, 'data_exists'] = True
-                        continue
-                
-                data = self.read_local(l0)
-                axes = (1, 3, 4)
-                data_steps = pd.DataFrame(np.sum(np.isfinite(data.data), axis=axes)>0,
-                                          index=pd.DatetimeIndex(data.production_datetime, name='production_datetime'),
-                                          columns=pd.Index(data.leadtimes, name='leadtime')).stack()
-                valid_steps = data_steps[data_steps]
-                valid_steps = valid_steps.loc[valid_steps.index.isin(self.data_index.index)]
-                self.data_index.loc[valid_steps.index, 'data_exists'] = valid_steps | self.data_index.loc[valid_steps.index, 'data_exists']
 
-                complete_index = self.data_index.loc[idx, 'local_file_complete']
-                complete_index.loc[valid_steps.index] = True
-                self.data_index.loc[idx, 'local_file_complete'] = complete_index.all()
+            if not thorough or self._assume_local_complete:
+                if self._assume_local_complete:
+                    mask = self.data_index['local_file_exists']
+                else:
+                    mask = self.data_index['local_file_complete']
+                self.data_index.loc[mask, 'data_exists'] = True
+            else:
+                for l0 in local_files[::-1]:
+                    idx = self.data_index['local_file']==l0
+                    idx = idx.loc[idx].index
+                    
+                    data = self.read_local(l0)
+                    axes = (1, 3, 4)
+                    data_steps = pd.DataFrame(np.sum(np.isfinite(data.data), axis=axes)>0,
+                                            index=pd.DatetimeIndex(data.production_datetime, name='production_datetime'),
+                                            columns=pd.Index(data.leadtimes, name='leadtime')).stack()
+                    valid_steps = data_steps[data_steps]
+                    valid_steps = valid_steps.loc[valid_steps.index.isin(self.data_index.index)]
+                    self.data_index.loc[valid_steps.index, 'data_exists'] = valid_steps | self.data_index.loc[valid_steps.index, 'data_exists']
+
+                    complete_index = self.data_index.loc[idx, 'local_file_complete']
+                    complete_index.loc[valid_steps.index] = True
+                    self.data_index.loc[idx, 'local_file_complete'] = complete_index.all()
 
             # Fix completeness at the edges (maybe False when complete, but the check has not been made)
             self.data_index.loc[self.data_index['local_file']==previous_files['local_file'], 'local_file_complete'] = False
