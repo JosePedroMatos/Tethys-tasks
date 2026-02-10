@@ -54,6 +54,8 @@ class ERA5(BaseTask):
             t2m=False,
         )
 
+        FAIL_IF_OLDER = pd.Timedelta('8d')
+
     def __init__(self, *args, **kwargs):
 
         super().__init__(*args, **kwargs)
@@ -133,7 +135,7 @@ class ERA5(BaseTask):
             variables = ((options, local_path))
             info.append(variables)
 
-        self.diag('        Downloading (f{self._source_parallel_transfers} threads).', 1)
+        self.diag(f'        Downloading ({self._source_parallel_transfers} threads).', 1)
         downloaded = False
         results = []
         with ThreadPoolExecutor(max_workers=self._source_parallel_transfers) as executor:
@@ -168,7 +170,7 @@ class ERA5(BaseTask):
             data['data'] = ds[variable][...].data
             data['steps'] = ds.step.data
 
-        if len(data['steps'])<24:
+        if variable not in ['sd'] and len(data['steps'])<24:
             raise Exception(f'The downloaded data does not have the expected number of time steps.')
 
         return data
@@ -408,6 +410,11 @@ class ERA5_CAUCASUS_TP(ERA5_CAUCASUS_T2M):
     with CaptureNewVariables() as _ERA5_CAUCASUS_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tp'
 
+class ERA5_CAUCASUS_SD(ERA5_CAUCASUS_T2M):
+
+    with CaptureNewVariables() as _ERA5_CAUCASUS_SD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='sd'
+
 class ERA5_IBERIA_T2M(ERA5):
 
     with CaptureNewVariables() as _ERA5_IBERIA_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
@@ -434,13 +441,65 @@ class ERA5_TAJIKISTAN_TP(ERA5_TAJIKISTAN_T2M):
 
 
 
+def removes_file_from_zip(folder:str):
+
+    files = Path(folder).rglob('*.zip')
+    for file in files:
+        with ZipFile(file, 'r') as zip_read:
+            namelist = zip_read.namelist()
+            
+            # Check if data.grib exists
+            if 'data.grib' not in namelist or len(namelist)==1:
+                continue
+            
+            # Create temporary file for the new zip
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                temp_path = temp_file.name
+            
+            try:
+                # Write only data.grib to new zip
+                with ZipFile(temp_path, 'w') as zip_write:
+                    zip_write.writestr('data.grib', zip_read.read('data.grib'))
+                
+                # Replace original file using shutil for cross-drive compatibility
+                shutil.move(temp_path, file)
+                print(file)
+            except Exception as ex:
+                print(f'Error processing {file}: {ex}')
+                Path(temp_path).unlink(missing_ok=True)
+
+def rename_lowercase(folder:str):
+
+    files = [i for i in Path(folder).rglob('*.zip')]
+    for file in files[::-1]:
+        new_name = file.parent / file.name.lower()
+        tmp_file = file.parent / (new_name.name + '_')
+        if file.name != new_name.name:
+            try:
+                file.rename(tmp_file)
+                tmp_file.rename(new_name)
+                print(f'Renamed {file} to {new_name}')
+            except Exception as ex:
+                print(f'Error renaming {file}: {ex}')
+
+
+
+
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    era5 = ERA5_BELGIUM_T2M(download_from_source=True, date_from='2025-10-01', source_parallel_transfers=2)
+    # path = r'T:\tethys-tasks local\ERA5_TP\era5_tp_caucasus'
+    # removes_file_from_zip(path)
+
+    # path = r'T:\tethys-tasks local\ERA5_SD'
+    # rename_lowercase(path)
+
+    # era5 = ERA5_CAUCASUS_T2M(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
+    era5 = ERA5_CAUCASUS_TP(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
+    # era5 = ERA5_CAUCASUS_SD(download_from_source=True, date_from='1995-01-01', source_parallel_transfers=3)
     # era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2021-01-01', source_parallel_transfers=2)
-    era5.retrieve_and_upload(verify=False)
+    era5.retrieve_and_upload()
     # era5.retrieve()
     # era5.upload_to_cloud()
     era5.store()

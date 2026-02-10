@@ -378,8 +378,19 @@ class BaseTask():
         if stored:
             stored_files = self.data_index['stored_file'].unique()
             self.data_index.loc[:, 'stored_file_exists'] = False
-            for f0 in stored_files:
-                self.data_index.loc[self.data_index['stored_file']==f0, 'stored_file_exists'] = Path(f0).exists()
+            
+            # Build set of existing files using rglob
+            if len(stored_files) > 0:
+                extension = Path(stored_files[0]).suffix
+                search_roots = set(Path(f).parents[2] for f in stored_files if len(Path(f).parents) > 2)
+                existing_files = set()
+                for root in search_roots:
+                    if root.exists():
+                        existing_files.update(p for p in root.rglob(f'*{extension}'))
+                
+                # Batch update using vectorized isin()
+                mask = pd.Series([Path(p) for p in self.data_index['stored_file']]).isin(existing_files)
+                self.data_index.loc[mask, 'stored_file_exists'] = True
 
             for folder in set([Path(f).parent for f in stored_files]):
                 ci = CompletenessIndex(folder)
@@ -396,8 +407,19 @@ class BaseTask():
         if local:
             local_files = self.data_index['local_file'].unique()
             self.data_index.loc[:, 'local_file_exists'] = False
-            for f0 in local_files:
-                self.data_index.loc[self.data_index['local_file']==f0, 'local_file_exists'] = Path(f0).exists()
+            
+            # Build set of existing files using rglob
+            if len(local_files) > 0:
+                extension = Path(local_files[0]).suffix
+                search_roots = set(Path(f).parents[2] for f in local_files if len(Path(f).parents) > 2)
+                existing_files = set()
+                for root in search_roots:
+                    if root.exists():
+                        existing_files.update(p for p in root.rglob(f'*{extension}'))
+                
+                # Batch update using vectorized isin()
+                mask = pd.Series([Path(p) for p in self.data_index['local_file']]).isin(existing_files)
+                self.data_index.loc[mask, 'local_file_exists'] = True
 
             for folder in set([Path(f).parent for f in local_files]):
                 ci = CompletenessIndex(folder)
@@ -415,8 +437,12 @@ class BaseTask():
             cloud_files = self.data_index.loc[~self.data_index['stored_file_complete'] & ~self.data_index['local_file_complete'], 'cloud_file'].unique()
             self.data_index.loc[:, 'cloud_file_exists'] = False
             cloud_files_exist = self._check_cloud(cloud_files)
-            for f0, exists in zip(cloud_files, cloud_files_exist):
-                self.data_index.loc[self.data_index['cloud_file']==f0, 'cloud_file_exists'] = exists
+            
+            # Batch update using vectorized operation
+            existing_cloud_files = [f for f, exists in zip(cloud_files, cloud_files_exist) if exists]
+            if existing_cloud_files:
+                mask = self.data_index['cloud_file'].isin(existing_cloud_files)
+                self.data_index.loc[mask, 'cloud_file_exists'] = True
 
     def _check_existing_data(self, stored:bool=True, local:bool=True, cloud:bool=True, thorough:bool=False, check_files:bool=True, **kwargs) -> None:
         '''
