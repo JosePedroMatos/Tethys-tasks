@@ -126,7 +126,7 @@ class GPM_IMERG_FINAL(BaseTask):
                 with os.fdopen(fd, 'wb') as handle:
                     shutil.copyfileobj(response, handle)
 
-            temp_file.replace(dest_path)
+            shutil.move(temp_file, dest_path)
             return 'Downloaded', str(dest_path)
         except urllib.error.HTTPError as ex:
             if ex.code == 404:
@@ -424,10 +424,13 @@ class GPM_IMERG_LATE(GPM_IMERG_FINAL):
         
         FILE_TEMPLATE = '3B-HHR-L.MS.MRG.3IMERG.%Y%m%d-S%H%M%S-E{{end_str}}.{{dly_mins}}.V07B.HDF5.nc4'
 
-        DOWNLOAD_TEMPLATE = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/hyrax/GPM_L3/GPM_3IMERGHH.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
+        DOWNLOAD_TEMPLATE = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/hyrax/GPM_L3/GPM_3IMERGHHL.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
         CLOUD_TEMPLATE = 'IMERG_LATE/%Y/%j/' + FILE_TEMPLATE
         LOCAL_PATH_TEMPLATE = 'IMERG_LATE/%Y/%m/%d/' + FILE_TEMPLATE
         STORAGE_PATH_TEMPLATE = 'IMERG_LATE/imerg_late_{self._zone}/%Y/%m/tethys_imerg_late_{{floor_7_days}}.nct'
+
+        FAIL_IF_OLDER = pd.DateOffset(hours=18)
+
 
 class GPM_IMERG_LATE_BELGIUM(GPM_IMERG_LATE):
     with CaptureNewVariables() as _GPM_IMERG_LATE_BELGIUM_VARIABLES:
@@ -458,15 +461,20 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    gpm = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
+    # gpm = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
     # alaro = ALARO40L_TP(download_from_source=True, date_from='2025-10-01')
     # mr = alaro.read_local('tests/data/ALARO/2026012900.zip')
     
-    gpm.retrieve_store_and_upload()
+    # gpm.retrieve_store_and_upload()
     # gpm.store()
 
     # files = gpm.data_index.loc[gpm.data_index['stored_file_exists'], 'stored_file'].unique()
     # mr = MeteoRaster.load(files[0])
     # mr.plot_mean(coastline=True, vmax=5, multiplier=48)
+
+
+    gpm = GPM_IMERG_LATE_IBERIA(download_from_source=True, date_from='2026-02-04 00:00')
+    gpm.retrieve_store_and_upload()
+
 
     pass
