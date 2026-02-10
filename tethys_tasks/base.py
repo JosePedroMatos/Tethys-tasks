@@ -142,6 +142,8 @@ class BaseTask():
         self.source_bounding_box = None
         if self._source_kml.endswith('.kml'):
             self.source_bounding_box = self._get_bounding_box(self._source_kml, self._pixel_size)
+        else:
+            self.source_bounding_box = dict(north=90, west=-180, south=-90, east=180)
         self.storage_bounding_box = None
         if self._storage_kml.endswith('.kml'):
             self.storage_bounding_box = self._get_bounding_box(self._storage_kml, self._pixel_size)
@@ -250,10 +252,10 @@ class BaseTask():
             )
         elif isinstance(index['leadtime'][0], pd.DateOffset):
             #created as this [pd.DateOffset(months=i) for i in range(7)] (always defined in months for simplicity)
-            index = index.assign(
-                lt_months=index['leadtime'].apply(lambda x: x.months),
-                lt_years=index['leadtime'].apply(lambda x: x.months) / 12,
-            )
+            if hasattr(index['leadtime'].iloc[-1], 'months'):
+                index = index.assign(lt_years=index['leadtime'].apply(lambda x: x.months))
+            else:
+                index = index.assign(lt_years=index['leadtime'].apply(lambda x: x.years))
 
         for k0, f0 in additional_columns.items():
             index.loc[:, k0] = f0(index)
@@ -874,10 +876,10 @@ class BaseTask():
                 # Leadtimes
             leadtimes = index['leadtime'].unique()
             if isinstance(leadtimes[0], pd.DateOffset):
-                pass
+                valid_leadtimes = pd.Index(leadtimes).isin(data.leadtimes)
             else:
                 leadtimes = pd.to_timedelta(leadtimes)
-            valid_leadtimes = leadtimes.isin(data.leadtimes)
+                valid_leadtimes = leadtimes.isin(data.leadtimes)
             if not valid_leadtimes.all():
                 tmp = np.full([len(valid_leadtimes) if i==1 else data.data.shape[i] for i in range(5)], np.nan)
                 tmp[:, valid_leadtimes, ...] = data.data
