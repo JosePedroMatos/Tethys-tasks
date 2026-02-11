@@ -236,7 +236,7 @@ class GFS_025_T2M(BaseTask):
 
         if file_type=='netcdf':
             with xr.open_dataset(local_file, engine='netcdf4') as ds:
-                raise Exception('NetCDF support to be checked')
+                # raise Exception('NetCDF support to be checked')
                 latitudes = ds.lat.data
                 longitudes = ds.lon.data
                 production_datetime = np.array(pd.to_datetime(ds.productionDatetimes.data))
@@ -253,8 +253,9 @@ class GFS_025_T2M(BaseTask):
 
                 if variable=='TMP':
                     data_ -= 273.15
-                if variable=='PRATE':
-                    data_ *= 3*3600
+
+        if variable=='PRATE':
+            data_ *= 3*3600
 
         if return_slice_only:
             return data_
@@ -506,10 +507,13 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    # task = GFS_025_T2M_BELGIUM(download_from_source=True, date_from='2026-02-01')
-    task = GFS_025_PCP_BELGIUM(download_from_source=True, date_from='2026-02-08')
+    task = GFS_025_T2M_CAUCASUS(download_from_source=False, date_from='2025-01-01')
+    # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
 
-    task.retrieve_store_and_upload()
+    # task.retrieve()
+    task.store()
+
+    # task.retrieve_store_and_upload()
 
     # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-01-01')    
     # task.retrieve_and_upload()
