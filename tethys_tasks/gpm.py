@@ -1,7 +1,6 @@
-from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor
+from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor, create_kml_classes
 import pandas as pd
 import xarray as xr
-from xarray.coding.times import decode_cf_datetime
 from pathlib import Path
 import shutil
 import tempfile
@@ -16,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
 from typing import Tuple
 import base64
-from datetime import datetime
 
 class GPM_IMERG_FINAL(BaseTask):
     '''
@@ -134,7 +132,9 @@ class GPM_IMERG_FINAL(BaseTask):
                     current = missing_state.get('min_missing')
                     if current is None or production_datetime < current:
                         missing_state['min_missing'] = production_datetime
-            return 'Not found', str(dest_path)
+                return 'Not found', str(dest_path)
+            else:
+                return f'Failed ({ex.code})', str(dest_path)
         except Exception as ex:
             if fd is not None:
                 try:
@@ -190,9 +190,9 @@ class GPM_IMERG_FINAL(BaseTask):
                         msg = monitor.mark_success(downloaded_file)
                         self.diag('        ' + msg, 1)
                         downloaded = True
-                    elif status=='Failed':
+                    elif status.startswith('Failed'):
                         self.diag(f'        Download failed for {futures[future]}.', 1)
-                    elif status=='Not found':
+                    elif status.startswith('Not found'):
                         self.diag(f'        Not found. Skipping beyond {futures[future]}.', 1)
 
         if downloaded:
@@ -386,32 +386,6 @@ class GPM_IMERG_FINAL(BaseTask):
 
         return stored
 
-class GPM_IMERG_FINAL_BELGIUM(GPM_IMERG_FINAL):
-    with CaptureNewVariables() as _GPM_IMERG_FINAL_BELGIUM_VARIABLES:
-        ZONE = 'belgium'
-        STORAGE_KML='tethys_tasks/resources/belgium.kml'
-
-class GPM_IMERG_FINAL_CAUCASUS(GPM_IMERG_FINAL):
-    with CaptureNewVariables() as _GPM_IMERG_FINAL_CAUCASUS_VARIABLES:
-        ZONE = 'caucasus'
-        STORAGE_KML='tethys_tasks/resources/caucasus.kml'
-
-class GPM_IMERG_FINAL_IBERIA(GPM_IMERG_FINAL):
-    with CaptureNewVariables() as _GPM_IMERG_FINAL_IBERIA_VARIABLES:
-        ZONE = 'iberia'
-        STORAGE_KML='tethys_tasks/resources/iberia.kml'
-
-class GPM_IMERG_FINAL_TAJIKISTAN(GPM_IMERG_FINAL):
-    with CaptureNewVariables() as _GPM_IMERG_FINAL_TAJIKISTAN_VARIABLES:
-        ZONE = 'tajikistan'
-        STORAGE_KML='tethys_tasks/resources/tajikistan.kml'
-
-class GPM_IMERG_FINAL_ZAMBEZI(GPM_IMERG_FINAL):
-    with CaptureNewVariables() as _GPM_IMERG_FINAL_ZAMBEZI_VARIABLES:
-        ZONE = 'zambezi'
-        STORAGE_KML='tethys_tasks/resources/zambezi.kml'
-
-
 class GPM_IMERG_LATE(GPM_IMERG_FINAL):
     '''
     Docstring for GPM IMERG Final Run (30 min) precipitation data
@@ -431,31 +405,9 @@ class GPM_IMERG_LATE(GPM_IMERG_FINAL):
 
         FAIL_IF_OLDER = pd.DateOffset(hours=18)
 
-
-class GPM_IMERG_LATE_BELGIUM(GPM_IMERG_LATE):
-    with CaptureNewVariables() as _GPM_IMERG_LATE_BELGIUM_VARIABLES:
-        ZONE = 'belgium'
-        STORAGE_KML='tethys_tasks/resources/belgium.kml'
-
-class GPM_IMERG_LATE_CAUCASUS(GPM_IMERG_LATE):
-    with CaptureNewVariables() as _GPM_IMERG_LATE_CAUCASUS_VARIABLES:
-        ZONE = 'caucasus'
-        STORAGE_KML='tethys_tasks/resources/caucasus.kml'
-
-class GPM_IMERG_LATE_IBERIA(GPM_IMERG_LATE):
-    with CaptureNewVariables() as _GPM_IMERG_LATE_IBERIA_VARIABLES:
-        ZONE = 'iberia'
-        STORAGE_KML='tethys_tasks/resources/iberia.kml'
-
-class GPM_IMERG_LATE_TAJIKISTAN(GPM_IMERG_LATE):
-    with CaptureNewVariables() as _GPM_IMERG_LATE_TAJIKISTAN_VARIABLES:
-        ZONE = 'tajikistan'
-        STORAGE_KML='tethys_tasks/resources/tajikistan.kml'
-
-class GPM_IMERG_LATE_ZAMBEZI(GPM_IMERG_LATE):
-    with CaptureNewVariables() as _GPM_IMERG_LATE_ZAMBEZI_VARIABLES:
-        ZONE = 'zambezi'
-        STORAGE_KML='tethys_tasks/resources/zambezi.kml'
+# creates regional classes such as GPM_IMERG_FINAL_CAUCASUS, GPM_IMERG_LATE_CAUCASUS, etc...
+create_kml_classes(GPM_IMERG_FINAL)
+create_kml_classes(GPM_IMERG_LATE)
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
@@ -473,7 +425,7 @@ if __name__=='__main__':
     # mr.plot_mean(coastline=True, vmax=5, multiplier=48)
 
 
-    gpm = GPM_IMERG_LATE_IBERIA(download_from_source=True, date_from='2026-02-04 00:00')
+    gpm = GPM_IMERG_FINAL_IBERIA(download_from_source=True, date_from='2025-09-04 00:00')
     gpm.retrieve_store_and_upload()
 
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
-from contextlib import ContextDecorator
-import json
 from pathlib import Path
 import time
 import threading
+from collections.abc import Iterable
+import sys
+import importlib.resources as importlib_resources
+import pandas as pd
+
 
 class CaptureNewVariables():
     '''
@@ -81,7 +84,6 @@ class DownloadMonitor:
     def __exit__(self, exc_type, exc, tb):
         return None
 
-
 class UploadMonitor:
     """Tracks aggregated upload rate across multiple files."""
 
@@ -109,3 +111,132 @@ class UploadMonitor:
 
     def __exit__(self, exc_type, exc, tb):
         return None
+    
+class CompletenessIndex():
+
+    def __init__(self, folder:Path):
+        self.folder = folder
+        self.index_file = folder / 'completeness.csv'
+
+        self.folder.mkdir(exist_ok=True, parents=True)
+        
+        self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete', dtype=float)
+
+        self.read()
+        self.check_existance()
+    
+    def read(self):
+        if self.index_file.exists():
+            self.index = pd.read_csv(self.index_file, sep=',', index_col='file_name')
+
+            if isinstance(self.index, pd.DataFrame):
+                if self.index.shape[1]==1:
+                    self.index = self.index.iloc[:, 0]
+                else:
+                    self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete')
+                    return
+
+            if not isinstance(self.index, pd.Series) or self.index.name != 'complete' or self.index.index.name != 'file_name':
+                self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete')
+
+    def check_existance(self):
+        for f0 in self.index.index:
+            if not (self.folder / f0).exists():
+                self.index[f0] = False
+
+    def write(self):
+        self.index = self.index[self.index==True]
+        try:
+            if self.index.empty:
+                if self.index_file.exists():
+                    self.index_file.unlink()
+            else:
+                self.index.to_csv(self.index_file, sep=',')
+        except Exception as ex:
+            print(f'Update of completeness index failed: {self.index_file.parent.absolute()} ({ex}).')
+            
+
+    def remove(self, files:Iterable):
+        for f0 in files:
+            if f0 in self.index.index:
+                self.index[f0] = False
+
+    def include(self, files:Iterable):
+        self.index = self.index.reindex(files, fill_value=True)
+
+    def get_complete(self):
+        return self.index[self.index].index.tolist()
+
+class _VariableCapture:
+    def __init__(self, new_vars: dict):
+        self.new_vars = new_vars
+
+
+def create_kml_classes(base_class, variable_kwargs:dict={}) -> None:
+    '''
+    Docstring for create_kml_classes
+    
+    Creates regional classes based on a base class and a list of parameters at runtime.
+    Does so for each .kml file in resources.
+
+    :param base_class: The class that serves as the basis for the regional classes. Must be defined in the respective .py file. Example: ERA5.
+    :param variable_kwargs: a dict of lists of variables. Must be linked to the base class. Example: {"VARIABLE": ["tp", "t2m"]}
+    '''
+    try:
+        resources = importlib_resources.files('tethys_tasks.resources')
+        kml_entries = [entry for entry in resources.iterdir() if entry.name.lower().endswith('.kml')]
+    except Exception:
+        resources_path = Path(__file__).resolve().parent / 'resources'
+        kml_entries = list(resources_path.glob('*.kml')) if resources_path.exists() else []
+
+    target_module = sys.modules.get(base_class.__module__)
+    if target_module is None:
+        raise RuntimeError(f'Base class module not loaded: {base_class.__module__}')
+
+    print(f'')
+
+    keys = variable_kwargs.keys()
+    sizes = list(set([len(variable_kwargs[k]) for k in keys]))
+    if len(sizes)>1:
+        raise Exception(f'All variables called in "create_kml_classes" must have a list of paramters of the same length ({base_class.__name__}).')
+
+    for entry in sorted(kml_entries, key=lambda p: p.name):
+        zone = Path(entry.name).stem.lower()
+        source_kml = f'tethys_tasks/resources/{entry.name}'
+
+        if len(sizes)==0:
+            loop = [0]
+        else:
+            loop = [i for i in range(sizes[0])]
+        for i0 in loop:
+            if 'VARIABLE' in keys:
+                class_name = f'{base_class.__name__}_{variable_kwargs["VARIABLE"][i0].upper()}_{zone.upper()}'
+            else:
+                class_name = f'{base_class.__name__}_{zone.upper()}'
+                
+            if hasattr(target_module, class_name):
+                continue
+
+            if len(sizes)>0:
+                _variable_kwargs = {k: i[i0] for k, i in variable_kwargs.items()}
+            else:
+                _variable_kwargs = {}
+
+            attrs = {
+                '__module__': base_class.__module__,
+                f'_{class_name}_VARIABLES': _VariableCapture(
+                    {
+                        'SOURCE_KML': source_kml,
+                        'ZONE': zone,
+                        **_variable_kwargs
+                    }
+                ),
+                'SOURCE_KML': source_kml,
+                'ZONE': zone,
+                **_variable_kwargs
+            }
+
+            setattr(target_module, class_name, type(class_name, (base_class,), attrs))
+            if not target_module.__name__.startswith('__main__'):
+                print(f'    Class "{target_module.__name__}.{class_name}" created at runtime.')
+            

@@ -25,10 +25,10 @@ docker build -t tethys-tasks:latest .
 ### Run a specific class function (built image)
 Uses the code baked into the image.
 ```bash
-docker-compose run --rm tethys-tasks ERA5_ZAMBEZI_TP retrieve_and_upload 
---class_args "[\"True\"]" --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=False\": \"False\"}" 
+docker-compose run --rm tethys-tasks C3S_ECMWF_TPRATE_IBERIA retrieve_store_and_upload --class_kwargs "{\"date_from\": \"'2025-12-01'\", \"download_from_source\": \"True\"}" 
 --fun_kwargs "{}"
 
+docker-compose run --rm tethys-tasks ERA5_TP_CAUCASUS retrieve_store_upload_and_cleanup --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=True\": \"True\"}"
 
 docker-compose run --rm tethys-tasks ERA5_ZAMBEZI_TP store --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=False\": \"False\"}" 
 

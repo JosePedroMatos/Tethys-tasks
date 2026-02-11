@@ -1,4 +1,4 @@
-from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor
+from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor, create_kml_classes
 import pandas as pd
 import numpy as np
 import xarray as xr
@@ -16,12 +16,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExec
 from uuid import uuid4
 from typing import Tuple
 
-class GFS_025_T2M(BaseTask):
+class GFS_025(BaseTask):
     '''
     Docstring for GFS 0.25 air temperature data for the caucasus region
     '''
 
-    with CaptureNewVariables() as _GFS_025_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+    with CaptureNewVariables() as _GFS_025_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         PUBLICATION_LATENCY = pd.Timedelta(hours=8)
         PUBLICATION_MEMORY = pd.Timedelta(days=10)
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=24)
@@ -443,74 +443,18 @@ class GFS_025_T2M(BaseTask):
 
         return stored
 
-class GFS_025_T2M_CAUCASUS(GFS_025_T2M):
-    with CaptureNewVariables() as _GFS_025_T2M_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
-        ZONE = 'caucasus'
-        STORAGE_KML='tethys_tasks/resources/caucasus.kml'
-        VARIABLE = 'TMP'
-        VARIABLE_LOWER = 'tmp'
-
-class GFS_025_PCP_CAUCASUS(GFS_025_T2M_CAUCASUS):
-    with CaptureNewVariables() as _GFS_025_PCP_CAUCASUS_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
-        VARIABLE = 'PRATE'
-        VARIABLE_LOWER = 'pcp'
-
-class GFS_025_T2M_BELGIUM(GFS_025_T2M):
-    with CaptureNewVariables() as _GFS_025_T2M_BELGIUM_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
-        ZONE = 'belgium'
-        STORAGE_KML='tethys_tasks/resources/belgium.kml'
-        VARIABLE = 'TMP'
-        VARIABLE_LOWER = 'tmp'
-
-class GFS_025_PCP_BELGIUM(GFS_025_T2M_BELGIUM):
-    with CaptureNewVariables() as _GFS_025_PCP_BELGIUM_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
-        VARIABLE = 'PRATE'
-        VARIABLE_LOWER = 'pcp'
-
-class GFS_025_T2M_IBERIA(GFS_025_T2M):
-    with CaptureNewVariables() as _GFS_025_T2M_IBERIA_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
-        ZONE = 'iberia'
-        STORAGE_KML='tethys_tasks/resources/iberia.kml'
-        VARIABLE = 'TMP'
-        VARIABLE_LOWER = 'tmp'
-
-class GFS_025_PCP_IBERIA(GFS_025_T2M_IBERIA):
-    with CaptureNewVariables() as _GFS_025_PCP_IBERIA_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
-        VARIABLE = 'PRATE'
-        VARIABLE_LOWER = 'pcp'
-
-class GFS_025_T2M_TAJIKISTAN(GFS_025_T2M):
-    with CaptureNewVariables() as _GFS_025_T2M_TAJIKISTAN_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
-        ZONE = 'tajikistan'
-        STORAGE_KML='tethys_tasks/resources/tajikistan.kml'
-        VARIABLE = 'TMP'
-        VARIABLE_LOWER = 'tmp'
-
-class GFS_025_PCP_TAJIKISTAN(GFS_025_T2M_TAJIKISTAN):
-    with CaptureNewVariables() as _GFS_025_PCP_TAJIKISTAN_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
-        VARIABLE = 'PRATE'
-        VARIABLE_LOWER = 'pcp'
-
-class GFS_025_T2M_ZAMBEZI(GFS_025_T2M):
-    with CaptureNewVariables() as _GFS_025_T2M_ZAMBEZI_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
-        ZONE = 'zambezi'
-        STORAGE_KML='tethys_tasks/resources/zambezi.kml'
-        VARIABLE = 'TMP'
-        VARIABLE_LOWER = 'tmp'
-
-class GFS_025_PCP_ZAMBEZI(GFS_025_T2M_ZAMBEZI):
-    with CaptureNewVariables() as _GFS_025_PCP_ZAMBEZI_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES        
-        VARIABLE = 'PRATE'
-        VARIABLE_LOWER = 'pcp'
+# creates regional classes such as GFS_025_TMP_CAUCASUS, GFS_025_PMP_CAUCASUS, etc...
+variable_kwargs = {'VARIABLE': ['TMP', 'PCP'], 'VARIABLE_LOWER': ['tmp', 'pcp']}
+create_kml_classes(GFS_025, variable_kwargs)
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = GFS_025_T2M_CAUCASUS(download_from_source=False, date_from='2025-01-01')
+    task = GFS_025_TMP_CAUCASUS(download_from_source=False, date_from='2026-02-10')
     # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
 
-    # task.retrieve()
+    task.retrieve_and_upload()
     task.store()
 
     # task.retrieve_store_and_upload()

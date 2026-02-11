@@ -2,7 +2,7 @@
 import pandas as pd
 import os
 from pathlib import Path
-from tethys_tasks import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor
+from tethys_tasks import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor, CompletenessIndex
 from collections.abc import Iterable
 import xml.etree.ElementTree as ET
 import numpy as np
@@ -12,61 +12,6 @@ import importlib.resources as importlib_resources
 from azure.storage.blob import BlobServiceClient
 from azure.core.credentials import AzureSasCredential
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-class CompletenessIndex():
-
-    def __init__(self, folder:Path):
-        self.folder = folder
-        self.index_file = folder / 'completeness.csv'
-
-        self.folder.mkdir(exist_ok=True, parents=True)
-        
-        self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete', dtype=float)
-
-        self.read()
-        self.check_existance()
-    
-    def read(self):
-        if self.index_file.exists():
-            self.index = pd.read_csv(self.index_file, sep=',', index_col='file_name')
-
-            if isinstance(self.index, pd.DataFrame):
-                if self.index.shape[1]==1:
-                    self.index = self.index.iloc[:, 0]
-                else:
-                    self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete')
-                    return
-
-            if not isinstance(self.index, pd.Series) or self.index.name != 'complete' or self.index.index.name != 'file_name':
-                self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete')
-
-    def check_existance(self):
-        for f0 in self.index.index:
-            if not (self.folder / f0).exists():
-                self.index[f0] = False
-
-    def write(self):
-        self.index = self.index[self.index==True]
-        try:
-            if self.index.empty:
-                if self.index_file.exists():
-                    self.index_file.unlink()
-            else:
-                self.index.to_csv(self.index_file, sep=',')
-        except Exception as ex:
-            print(f'Update of completeness index failed: {self.index_file.parent.absolute()} ({ex}).')
-            
-
-    def remove(self, files:Iterable):
-        for f0 in files:
-            if f0 in self.index.index:
-                self.index[f0] = False
-
-    def include(self, files:Iterable):
-        self.index = self.index.reindex(files, fill_value=True)
-
-    def get_complete(self):
-        return self.index[self.index].index.tolist()
 
 class BaseTask():
     '''
@@ -87,6 +32,8 @@ class BaseTask():
         AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
         CLOUD_STORAGE_FOLDER = os.getenv('CLOUD_STORAGE_FOLDER')
 
+        MAX_LOCAL_AGE_MONTHS = os.getenv('MAX_LOCAL_AGE_MONTHS', '')
+
         LOCAL_STORAGE_FOLDER = __LOCAL_STORAGE_FOLDER
         TRANSFER_FOLDER = __TRANSFER_FOLDER
 
@@ -100,7 +47,6 @@ class BaseTask():
         STORAGE_SEARCH_WINDOW = pd.DateOffset(months=14)
         ASSUME_LOCAL_COMPLETE = False
 
-
         VARIABLE=''
         SOURCE_KML = ''
         STORAGE_KML = ''
@@ -112,7 +58,8 @@ class BaseTask():
         STORAGE_PATH_TEMPLATE = f'ERA5_{VARIABLE.upper()}/era5_{VARIABLE}_{ZONE}/%Y/tethys_era5_{VARIABLE}_%Y.%m.01.mr'
 
         DATE_FROM = (pd.Timestamp.utcnow() - pd.Timedelta('7d')).strftime('%Y-%m-%d %H:%M:%S') #'2021-04-15'
-        FAIL_IF_OLDER = pd.Timedelta('36h')
+        
+        FAIL_IF_OLDER = pd.Timedelta('50d')
 
     def __init__(self, download_from_source=False, date_from:str='', date_to:str='', verbose=2, *args, **kwargs):
         '''
@@ -240,8 +187,14 @@ class BaseTask():
         # This operation can be costly
         index = pd.MultiIndex.from_product([production_datetimes, leadtimes], names=['production_datetime', 'leadtime']).to_frame(index=False)
 
+        # Handle event_datetime separately for Timedelta vs DateOffset to ensure vectorized operations
+        if len(index) > 0 and isinstance(index['leadtime'].iloc[-1], pd.Timedelta):
+            event_datetime = index['production_datetime'] + index['leadtime']
+        else:
+            event_datetime = index.apply(lambda row: row['production_datetime'] + row['leadtime'], axis=1)
+        
         index = index.assign(
-            event_datetime=index['production_datetime'] + index['leadtime'],
+            event_datetime=event_datetime,
             doy=index.production_datetime.dt.day_of_year,
         )
 
@@ -301,7 +254,7 @@ class BaseTask():
 
         return index
 
-    def retrieve(self, verify:bool=True, *args, **kwargs) -> bool:
+    def retrieve(self, fail_if_older:bool=False, *args, **kwargs) -> bool:
         '''
         Docstring for retrieve
         
@@ -325,20 +278,20 @@ class BaseTask():
 
         self.diag('    Done retrieving.', 1)
 
-        if verify:
+        if fail_if_older:
             self._check_cutoff()
 
         return downloaded
 
-    def _check_cutoff(self, issue_error:bool=True) -> bool:
+    def _check_cutoff(self, fail_if_older:bool=True) -> bool:
         '''
         Checks if data exists and is recent enough based on a predefined cutoff period.
         Args:
-            issue_error (bool): If True, raises an exception if data is missing or outdated.
+            fail_if_older (bool): If True, raises an exception if data is missing or outdated.
         Returns:
             bool: True if data exists and is within the cutoff period, False otherwise.
         Raises:
-            Exception: If issue_error is True and no data exists or data is older than the cutoff.
+            Exception: If verify_new_data is True and no data exists or data is older than the cutoff.
         '''
         
         success = True
@@ -347,14 +300,14 @@ class BaseTask():
         data_exists = data_exists.loc[data_exists.values].index
         if data_exists.shape[0]==0:
             success = False
-            if issue_error:
+            if fail_if_older:
                 raise Exception(f'No data exists for the period ({self.__class__.__name__}).')
         else:
             last_date = data_exists[-1]
             cutoff_date = pd.Timestamp.utcnow().tz_localize(None) - self._fail_if_older
             if last_date<=cutoff_date:
                 success = False
-                if issue_error:
+                if fail_if_older:
                     raise Exception(f'No recent data exists ({self.__class__.__name__}). Last production: {last_date.strftime("%Y-%m-%d %H:%M:%S")}.')
 
         return success
@@ -494,7 +447,7 @@ class BaseTask():
                     mask = self.data_index['local_file_exists']
                 else:
                     mask = self.data_index['local_file_complete']
-                self.data_index.loc[mask, 'data_exists'] = True
+                self.data_index.loc[mask, ['data_exists', 'local_file_complete']] = True
             else:
                 for l0 in local_files[::-1]:
                     idx = self.data_index['local_file']==l0
@@ -905,14 +858,47 @@ class BaseTask():
 
         return stored
         
-    def retrieve_and_upload(self, verify:bool=True) -> None:
-        self.retrieve(verify=verify)
+    def cleanup_old_files(self):
+        self.diag('    Deleting old files...', 1)
+
+        ctr = 0
+        if self._max_local_age_months:
+            max_local_age = pd.DateOffset(months=int(self._max_local_age_months))
+            cutoff_date = pd.Timestamp.now() - max_local_age
+
+            extended_index = self.populate(cutoff_date - pd.DateOffset(years=1))
+            self.data_index = extended_index.loc[extended_index['stored_file'].isin(self.data_index['stored_file'].unique())]
+            self._clean_index()
+            self._update_index_and_completeness()
+
+            to_delete = self.data_index.loc[(self.data_index.production_datetime<=cutoff_date) & self.data_index.local_file_exists, 'local_file'].unique()
+
+
+            for f0 in to_delete:
+                try:
+                    Path(f0).unlink()
+                    ctr += 1
+                except Exception:
+                    pass
+        if ctr>0:
+            self.diag(f'        Deleted {ctr} outdated local files.', 1)
+        else:
+            self.diag(f'        No local files to delete.', 1)
+
+    def retrieve_and_upload(self, fail_if_older:bool=False) -> None:
+        self.retrieve(fail_if_older=fail_if_older)
         self.upload_to_cloud()
 
-    def retrieve_store_and_upload(self, verify:bool=True) -> None:
-        self.retrieve(verify=verify)
+    def retrieve_store_and_upload(self, fail_if_older:bool=False) -> None:
+        self.retrieve(fail_if_older=fail_if_older)
         self.store()
         self.upload_to_cloud()
+
+    def retrieve_store_upload_and_cleanup(self, fail_if_older:bool=False) -> None:
+        self.retrieve(fail_if_older=fail_if_older)
+        self.store()
+        self.upload_to_cloud()
+        self.cleanup_old_files()
 
     def _download_from_source(self) -> bool:
         '''
@@ -936,3 +922,5 @@ class BaseTask():
         '''
 
         pass
+
+

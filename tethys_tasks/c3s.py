@@ -1,4 +1,4 @@
-from tethys_tasks import BaseTask, CaptureNewVariables
+from tethys_tasks import BaseTask, CaptureNewVariables, create_kml_classes
 import pandas as pd
 import xarray as xr
 from pathlib import Path
@@ -193,59 +193,40 @@ class C3S_ECMWF(BaseTask):
         
         return tmp
 
+# creates regional classes such as C3S_ECMWF_TPRATE_ZAMBEZI, etc...
+variable_kwargs = {'VARIABLE': ['t2m', 'tprate']}
+create_kml_classes(C3S_ECMWF, variable_kwargs)
 
-
-class C3S_ECMWF_WORLD_T2M(C3S_ECMWF):
-    with CaptureNewVariables() as _C3S_ECMWF_WORLD_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+class C3S_ECMWF_T2M_WORLD(C3S_ECMWF):
+    with CaptureNewVariables() as _C3S_ECMWF_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='t2m'
         ZONE='world'
 
-class C3S_ECMWF_WORLD_TP(C3S_ECMWF):
-    with CaptureNewVariables() as _C3S_ECMWF_WORLD_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+class C3S_ECMWF_TPRATE_WORLD(C3S_ECMWF):
+    with CaptureNewVariables() as _C3S_ECMWF_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
         ZONE='world'
-
-
-
-class C3S_ECMWF_ZAMBEZI_TP(C3S_ECMWF):
-    with CaptureNewVariables() as _C3S_ECMWF_ZAMBEZI_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/zambezi.kml'
-        VARIABLE='tprate'
-        ZONE='zambezi'
-
-class C3S_ECMWF_ZAMBEZI_T2M(C3S_ECMWF):
-    with CaptureNewVariables() as _C3S_ECMWF_ZAMBEZI_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/zambezi.kml'
-        VARIABLE='t2m'
-        ZONE='zambezi'
-
-class C3S_ECMWF_ZAMBEZI_TP(C3S_ECMWF):
-    with CaptureNewVariables() as _C3S_ECMWF_ZAMBEZI_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/zambezi.kml'
-        VARIABLE='tprate'
-        ZONE='zambezi'
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    c3s = C3S_ECMWF_WORLD_TP(download_from_source=True, date_from='2026-01-01')
+    c3s = C3S_ECMWF_TPRATE_CAUCASUS(download_from_source=True, date_from='2026-01-01')
     # era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2021-01-01', source_parallel_transfers=2)
-    c3s.retrieve_and_upload()
+    c3s.retrieve_store_upload_and_cleanup()
     # era5.retrieve()
     # era5.upload_to_cloud()
-    c3s.store()
 
     # mr = MeteoRaster.load(r'C:\tethys-tasks storage test\ERA5_T2M\era5_t2m_belgium\2026\tethys_era5_t2m_2026.01.01.nct')
     # mr.plot_mean(coastline=True, borders=True)
 
-    mr = None
-    for mr0 in c3s.data_index.loc[c3s.data_index['stored_file_complete'], 'stored_file'].unique():
-        if mr is None:
-            mr = MeteoRaster.load(mr0)
-        else:
-            mr.join(MeteoRaster.load(mr0))
-    mr.plot_mean(coastline=True, borders=True)
+    # mr = None
+    # for mr0 in c3s.data_index.loc[c3s.data_index['stored_file_complete'], 'stored_file'].unique():
+    #     if mr is None:
+    #         mr = MeteoRaster.load(mr0)
+    #     else:
+    #         mr.join(MeteoRaster.load(mr0))
+    # mr.plot_mean(coastline=True, borders=True)
 
     # kml = Path(r'C:\Users\zepedro\Downloads\zones.kml')
     # agg, centroids = mr.get_values_from_KML(kml, nameField='zone')

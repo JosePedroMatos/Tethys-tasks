@@ -1,4 +1,4 @@
-from tethys_tasks import BaseTask, CaptureNewVariables
+from tethys_tasks import BaseTask, CaptureNewVariables, create_kml_classes
 import pandas as pd
 import xarray as xr
 from pathlib import Path
@@ -31,8 +31,6 @@ class ERA5(BaseTask):
         CLOUD_TEMPLATE = 'test/ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
         LOCAL_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
         STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/tethys_era5_{self._variable}_%Y.%m.01.nct'
-        # STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%G/tethys_era5_{self._variable}_%G.%V.nc'
-        # STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/tethys_era5_{self._variable}_%Y.nc'
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=40)
 
@@ -220,7 +218,7 @@ class ERA5(BaseTask):
                 if parquet_file_.exists():
                     parquet_file = parquet_file_
 
-            if parquet_file:
+            if parquet_file.exists():
                 last_cum_step = pd.read_parquet(parquet_file)
                 if last_cum_step.shape != data['data'].shape[-2:]:
                     raise Exception(f'ERA5 Land ({self._variable}) processing failed. Lat and Lon of downloaded and stored files do not match.')
@@ -316,7 +314,8 @@ class ERA5(BaseTask):
         
         if self._cumulative[self._variable]:
 
-            complete = self.data_index.groupby('local_file').all().loc[:, 'data_exists']
+            complete = self.data_index.groupby('local_file').all().loc[:, ['data_exists', 'local_file_exists']]
+            complete = complete.apply(lambda x: x.all(), axis=1)
 
             for f0 in complete.index[complete].tolist():
                 # All the data is available. Check .parquet
@@ -374,114 +373,53 @@ class ERA5(BaseTask):
 
             self._update_completeness(stored=False)
 
-class ERA5_ZAMBEZI_T2M(ERA5):
+# creates regional classes such as ERA5_CAUCASUS_TP, ERA5_CAUCASUS_T2M, TAJIKISTAN_T2M, etc...
+create_kml_classes(ERA5, {'VARIABLE': ['tp', 't2m']})
 
-    with CaptureNewVariables() as _ERA5_ZAMBEZI_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/zambezi.kml'
-        VARIABLE='t2m'
-        ZONE='zambezi'
+#region utility_functions
 
-class ERA5_ZAMBEZI_TP(ERA5_ZAMBEZI_T2M):
+# def removes_file_from_zip(folder:str):
 
-    with CaptureNewVariables() as _ERA5_ZAMBEZI_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='tp'
-
-class ERA5_BELGIUM_T2M(ERA5):
-
-    with CaptureNewVariables() as _ERA5_BELGIUM_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/belgium.kml'
-        VARIABLE='t2m'
-        ZONE='belgium'
-
-class ERA5_BELGIUM_TP(ERA5_BELGIUM_T2M):
-
-    with CaptureNewVariables() as _ERA5_BELGIUM_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='tp'
-
-class ERA5_CAUCASUS_T2M(ERA5):
-
-    with CaptureNewVariables() as _ERA5_CAUCASUS_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/caucasus.kml'
-        VARIABLE='t2m'
-        ZONE='caucasus'
-
-class ERA5_CAUCASUS_TP(ERA5_CAUCASUS_T2M):
-
-    with CaptureNewVariables() as _ERA5_CAUCASUS_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='tp'
-
-class ERA5_CAUCASUS_SD(ERA5_CAUCASUS_T2M):
-
-    with CaptureNewVariables() as _ERA5_CAUCASUS_SD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='sd'
-
-class ERA5_IBERIA_T2M(ERA5):
-
-    with CaptureNewVariables() as _ERA5_IBERIA_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/iberia.kml'
-        VARIABLE='t2m'
-        ZONE='iberia'
-
-class ERA5_IBERIA_TP(ERA5_IBERIA_T2M):
-
-    with CaptureNewVariables() as _ERA5_IBERIA_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='tp'
-
-class ERA5_TAJIKISTAN_T2M(ERA5):
-
-    with CaptureNewVariables() as _ERA5_TAJIKISTAN_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        SOURCE_KML='tethys_tasks/resources/tajikistan.kml'
-        VARIABLE='t2m'
-        ZONE='tajikistan'
-
-class ERA5_TAJIKISTAN_TP(ERA5_TAJIKISTAN_T2M):
-
-    with CaptureNewVariables() as _ERA5_TAJIKISTAN_TP_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='tp'
-
-
-
-def removes_file_from_zip(folder:str):
-
-    files = Path(folder).rglob('*.zip')
-    for file in files:
-        with ZipFile(file, 'r') as zip_read:
-            namelist = zip_read.namelist()
+#     files = Path(folder).rglob('*.zip')
+#     for file in files:
+#         with ZipFile(file, 'r') as zip_read:
+#             namelist = zip_read.namelist()
             
-            # Check if data.grib exists
-            if 'data.grib' not in namelist or len(namelist)==1:
-                continue
+#             # Check if data.grib exists
+#             if 'data.grib' not in namelist or len(namelist)==1:
+#                 continue
             
-            # Create temporary file for the new zip
-            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                temp_path = temp_file.name
+#             # Create temporary file for the new zip
+#             with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+#                 temp_path = temp_file.name
             
-            try:
-                # Write only data.grib to new zip
-                with ZipFile(temp_path, 'w') as zip_write:
-                    zip_write.writestr('data.grib', zip_read.read('data.grib'))
+#             try:
+#                 # Write only data.grib to new zip
+#                 with ZipFile(temp_path, 'w') as zip_write:
+#                     zip_write.writestr('data.grib', zip_read.read('data.grib'))
                 
-                # Replace original file using shutil for cross-drive compatibility
-                shutil.move(temp_path, file)
-                print(file)
-            except Exception as ex:
-                print(f'Error processing {file}: {ex}')
-                Path(temp_path).unlink(missing_ok=True)
+#                 # Replace original file using shutil for cross-drive compatibility
+#                 shutil.move(temp_path, file)
+#                 print(file)
+#             except Exception as ex:
+#                 print(f'Error processing {file}: {ex}')
+#                 Path(temp_path).unlink(missing_ok=True)
 
-def rename_lowercase(folder:str):
+# def rename_lowercase(folder:str):
 
-    files = [i for i in Path(folder).rglob('*.zip')]
-    for file in files[::-1]:
-        new_name = file.parent / file.name.lower()
-        tmp_file = file.parent / (new_name.name + '_')
-        if file.name != new_name.name:
-            try:
-                file.rename(tmp_file)
-                tmp_file.rename(new_name)
-                print(f'Renamed {file} to {new_name}')
-            except Exception as ex:
-                print(f'Error renaming {file}: {ex}')
+#     files = [i for i in Path(folder).rglob('*.zip')]
+#     for file in files[::-1]:
+#         new_name = file.parent / file.name.lower()
+#         tmp_file = file.parent / (new_name.name + '_')
+#         if file.name != new_name.name:
+#             try:
+#                 file.rename(tmp_file)
+#                 tmp_file.rename(new_name)
+#                 print(f'Renamed {file} to {new_name}')
+#             except Exception as ex:
+#                 print(f'Error renaming {file}: {ex}')
 
+#endregion
 
 
 
@@ -496,14 +434,26 @@ if __name__=='__main__':
     # rename_lowercase(path)
 
     # era5 = ERA5_CAUCASUS_T2M(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
-    era5 = ERA5_CAUCASUS_TP(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
+    task = ERA5_TP_CAUCASUS(download_from_source=True, date_from='2025-10-01', source_parallel_transfers=3)
+    
+    task.retrieve_store_upload_and_cleanup()
+    
     # era5 = ERA5_CAUCASUS_SD(download_from_source=True, date_from='1995-01-01', source_parallel_transfers=3)
     # era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2021-01-01', source_parallel_transfers=2)
-    era5.retrieve_and_upload()
+    # era5.retrieve_store_and_upload()
     # era5.retrieve()
     # era5.upload_to_cloud()
-    era5.store()
+    # era5.store()
 
     # mr = MeteoRaster.load(r'C:\tethys-tasks storage test\ERA5_T2M\era5_t2m_belgium\2026\tethys_era5_t2m_2026.01.01.nct')
     # mr.plot_mean(coastline=True, borders=True)
+
+    # files = era5.data_index['stored_file'].unique()
+    # mr = MeteoRaster.load(files[-2])
+    # mr.plot_mean(coastline=True, borders=True)
+    # mr.get_values_from_latlon(42.5, 42.5).plot()
+
+    # kml = r'C:\Users\zepedro\Universidade de Lisboa\IST-TETHYS - GSE training 2025.09\Shared\SHP\Rioni.kml'
+    # data, centroids = mr.get_values_from_KML(kml, nameField='ID')
+
     pass
