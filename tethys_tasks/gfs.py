@@ -444,18 +444,17 @@ class GFS_025(BaseTask):
         return stored
 
 # creates regional classes such as GFS_025_TMP_CAUCASUS, GFS_025_PMP_CAUCASUS, etc...
-variable_kwargs = {'VARIABLE': ['TMP', 'PCP'], 'VARIABLE_LOWER': ['tmp', 'pcp']}
+variable_kwargs = {'VARIABLE': ['TMP', 'PRATE'], 'VARIABLE_LOWER': ['tmp', 'prate']}
 create_kml_classes(GFS_025, variable_kwargs)
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = GFS_025_TMP_CAUCASUS(download_from_source=False, date_from='2026-02-10')
+    task = GFS_025_PRATE_CAUCASUS(download_from_source=False, date_from='2026-02-11')
     # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
 
-    task.retrieve_and_upload()
-    task.store()
+    task.retrieve_store_upload_and_cleanup()
 
     # task.retrieve_store_and_upload()
 

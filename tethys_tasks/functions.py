@@ -202,7 +202,7 @@ def create_kml_classes(base_class, variable_kwargs:dict={}) -> None:
 
     for entry in sorted(kml_entries, key=lambda p: p.name):
         zone = Path(entry.name).stem.lower()
-        source_kml = f'tethys_tasks/resources/{entry.name}'
+        kml = f'tethys_tasks/resources/{entry.name}'
 
         if len(sizes)==0:
             loop = [0]
@@ -226,12 +226,14 @@ def create_kml_classes(base_class, variable_kwargs:dict={}) -> None:
                 '__module__': base_class.__module__,
                 f'_{class_name}_VARIABLES': _VariableCapture(
                     {
-                        'SOURCE_KML': source_kml,
+                        'SOURCE_KML': kml,
+                        'STORAGE_KML': kml,
                         'ZONE': zone,
                         **_variable_kwargs
                     }
                 ),
-                'SOURCE_KML': source_kml,
+                'SOURCE_KML': kml,
+                'STORAGE_KML': kml,
                 'ZONE': zone,
                 **_variable_kwargs
             }
