@@ -20,6 +20,9 @@ This project is designed to be run within a Docker container, typically orchestr
 ### Build the image
 ```bash
 docker build -t tethys-tasks:latest .
+
+docker save -o tethys-tasks.tar tethys-tasks
+docker load -i tethys-tasks.tar
 ```
 
 ### Run a specific class function (built image)
