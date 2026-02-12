@@ -195,6 +195,9 @@ class ERA5(BaseTask):
         
         self.diag(f'            Reading "{local_file}" ({self.__class__.__name__})', 1)
 
+        if not Path(local_file).exists():
+            raise Exception('Local file does not exit.')
+
         with tempfile.TemporaryDirectory() as temp_dir:
             with ZipFile(local_file, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
@@ -218,7 +221,7 @@ class ERA5(BaseTask):
                 if parquet_file_.exists():
                     parquet_file = parquet_file_
 
-            if parquet_file.exists():
+            if parquet_file is not None and Path(parquet_file).exists():
                 last_cum_step = pd.read_parquet(parquet_file)
                 if last_cum_step.shape != data['data'].shape[-2:]:
                     raise Exception(f'ERA5 Land ({self._variable}) processing failed. Lat and Lon of downloaded and stored files do not match.')
@@ -374,7 +377,7 @@ class ERA5(BaseTask):
             self._update_completeness(stored=False)
 
 # creates regional classes such as ERA5_CAUCASUS_TP, ERA5_CAUCASUS_T2M, TAJIKISTAN_T2M, etc...
-create_kml_classes(ERA5, {'VARIABLE': ['tp', 't2m']})
+create_kml_classes(ERA5, {'VARIABLE': ['tp', 't2m', 'sd']})
 
 #region utility_functions
 

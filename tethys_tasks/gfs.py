@@ -217,8 +217,8 @@ class GFS_025(BaseTask):
         variable: str,
         backend_kwargs: dict,
         grib_variable: dict,
-        leadtimes: pd.TimedeltaIndex | None = None,
-        units: dict | None = None,
+        leadtimes,
+        units,
         return_slice_only: bool = False,
     ):
         '''
