@@ -451,19 +451,24 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = GFS_025_PRATE_CAUCASUS(download_from_source=False, date_from='2025-01-01')
+    # task = GFS_025_TMP_CAUCASUS(download_from_source=False, date_from='2024-01-01')
+    task = GFS_025_PRATE_CAUCASUS(download_from_source=False, date_from='2024-01-01')
+    # task._update_index_and_completeness()
+
     # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
 
-    # task.retrieve_store_upload_and_cleanup()
+    task.store()
 
-    files = task.data_index['stored_file'].unique()
-    mr = None
-    for mr0 in task.data_index.loc[task.data_index['stored_file_complete'], 'stored_file'].unique():
-        if mr is None:
-            mr = MeteoRaster.load(mr0)
-        else:
-            mr.join(MeteoRaster.load(mr0))
-    mr.plot_mean(coastline=True, borders=True)
+    # # files = task.data_index['stored_file'].unique()
+    # files = task.data_index.loc[task.data_index['stored_file_exists'], 'stored_file'].unique()
+    # mr = None
+    # for mr0 in files:
+    #     if mr is None:
+    #         mr = MeteoRaster.load(mr0)
+    #     else:
+    #         mr.join(MeteoRaster.load(mr0))
+    # # mr.plot_mean(coastline=True, borders=True)
+    # mr.get_values_from_latlon_by_event(mr.get_values_from_latlon(42.5,42.5)).bfill(axis=1).iloc[:, 0].plot()
 
     # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-01-01')    
     # task.retrieve_and_upload()
