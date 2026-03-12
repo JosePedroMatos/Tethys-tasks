@@ -425,8 +425,8 @@ if __name__=='__main__':
     # mr.plot_mean(coastline=True, vmax=5, multiplier=48)
 
 
-    gpm = GPM_IMERG_FINAL_IBERIA(download_from_source=True, date_from='2025-09-04 00:00')
-    gpm.retrieve_store_and_upload()
+    task = GPM_IMERG_LATE_CAUCASUS(download_from_source=True, date_from='2026-02-11')
+    task.retrieve_store_upload_and_cleanup()
 
 
     pass

@@ -1,4 +1,4 @@
-from tethys_tasks import BaseTask, CaptureNewVariables, create_kml_classes
+from tethys_tasks import BaseTask, CaptureNewVariables
 import pandas as pd
 import xarray as xr
 from pathlib import Path
@@ -14,12 +14,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 import string
 
-class C3S_ECMWF(BaseTask):
+class C3S_ECMWF51_T2M_WORLD(BaseTask):
     '''
     Docstring for C3S_ECMWF
+    https://cds.climate.copernicus.eu/datasets/seasonal-monthly-single-levels?tab=overview
     '''
 
-    with CaptureNewVariables() as _C3S_ECMWF_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+    with CaptureNewVariables() as _C3S_ECMWF51_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         PUBLICATION_LATENCY = pd.Timedelta(days=8)
         PRODUCTION_FREQUENCY = pd.DateOffset(months=1)
         FAIL_IF_OLDER = pd.Timedelta(days=35)
@@ -31,15 +32,15 @@ class C3S_ECMWF(BaseTask):
 
         C3S_SYSTEM = '51'
         ORIGINATING_CENTRE = 'ecmwf'
-        PIXEL_SIZE = 0.1
-
+        PIXEL_SIZE = 1
+        VARIABLE='t2m'
+        ZONE='world'
 
         ASSUME_LOCAL_COMPLETE = True
 
-
-        CLOUD_TEMPLATE = 'test/C3S_ECMWF_{self._variable_upper}/c3s_ecmwf_{self._variable}_{self._zone}/%Y/c3s_ecmwf_{self._variable}_%Y.%m.grib'
-        LOCAL_PATH_TEMPLATE = 'C3S_ECMWF_{self._variable_upper}/c3s_ecmwf_{self._variable}_{self._zone}/%Y/c3s_ecmwf_{self._variable}_%Y.%m.grib'
-        STORAGE_PATH_TEMPLATE = 'C3S_ECMWF_{self._variable_upper}/c3s_ecmwf_{self._variable}_{self._zone}/%Y/tethys_c3s_ecmwf_{self._variable}_%Y.%m.nct'
+        CLOUD_TEMPLATE = f'test/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
+        LOCAL_PATH_TEMPLATE = f'C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
+        STORAGE_PATH_TEMPLATE = f'C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=40)
 
@@ -193,31 +194,138 @@ class C3S_ECMWF(BaseTask):
         
         return tmp
 
-# creates regional classes such as C3S_ECMWF_TPRATE_ZAMBEZI, etc...
-variable_kwargs = {'VARIABLE': ['t2m', 'tprate']}
-create_kml_classes(C3S_ECMWF, variable_kwargs)
+class C3S_ECMWF51_TPRATE_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_ECMWF51_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+        ZONE='world'
 
-class C3S_ECMWF_T2M_WORLD(C3S_ECMWF):
-    with CaptureNewVariables() as _C3S_ECMWF_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+class C3S_UKMO604_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_UKMO604_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='t2m'
         ZONE='world'
 
-class C3S_ECMWF_TPRATE_WORLD(C3S_ECMWF):
-    with CaptureNewVariables() as _C3S_ECMWF_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        C3S_SYSTEM = '604'
+        ORIGINATING_CENTRE = 'ukmo'
+
+class C3S_UKMO604_TPRATE_WORLD(C3S_UKMO604_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_UKMO604_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
+
+class C3S_MF9_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_MF9_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
         ZONE='world'
+
+        C3S_SYSTEM = '9'
+        ORIGINATING_CENTRE = 'meteofrance'
+
+class C3S_MF9_TPRATE_WORLD(C3S_MF9_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_MF9_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_DWD22_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_DWD22_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
+        ZONE='world'
+
+        C3S_SYSTEM = '22'
+        ORIGINATING_CENTRE = 'dwd'
+
+class C3S_DWD22_TPRATE_WORLD(C3S_DWD22_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_DWD22_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_CMCC4_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_CMCC4_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
+        ZONE='world'
+
+        C3S_SYSTEM = '4'
+        ORIGINATING_CENTRE = 'cmcc'
+
+class C3S_CMCC4_TPRATE_WORLD(C3S_CMCC4_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_CMCC4_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_NCEP2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_NCEP2_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
+        ZONE='world'
+
+        C3S_SYSTEM = '2'
+        ORIGINATING_CENTRE = 'NCEP'
+
+class C3S_NCEP2_TPRATE_WORLD(C3S_NCEP2_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_NCEP2_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_JMA3_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_JMA3_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
+        ZONE='world'
+
+        C3S_SYSTEM = '3'
+        ORIGINATING_CENTRE = 'jma'
+
+class C3S_JMA3_TPRATE_WORLD(C3S_JMA3_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_JMA3_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_ECCC5_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_ECCC5_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
+        ZONE='world'
+
+        C3S_SYSTEM = '5'
+        ORIGINATING_CENTRE = 'eccc'
+
+class C3S_ECCC5_TPRATE_WORLD(C3S_ECCC5_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_ECCC5_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_BOM2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_BOM2_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
+        ZONE='world'
+
+        C3S_SYSTEM = '2'
+        ORIGINATING_CENTRE = 'bom'
+
+class C3S_BOM2_TPRATE_WORLD(C3S_BOM2_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_BOM2_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    c3s = C3S_ECMWF_TPRATE_CAUCASUS(download_from_source=True, date_from='2026-01-01')
-    # era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2021-01-01', source_parallel_transfers=2)
-    c3s.retrieve_store_upload_and_cleanup()
-    # era5.retrieve()
-    # era5.upload_to_cloud()
 
-    # mr = MeteoRaster.load(r'C:\tethys-tasks storage test\ERA5_T2M\era5_t2m_belgium\2026\tethys_era5_t2m_2026.01.01.nct')
+    classes = [
+        C3S_ECMWF51_T2M_WORLD,
+        C3S_ECMWF51_TPRATE_WORLD,
+        C3S_UKMO604_T2M_WORLD,
+        C3S_UKMO604_TPRATE_WORLD,
+        C3S_MF9_T2M_WORLD,
+        C3S_MF9_TPRATE_WORLD,
+        C3S_DWD22_T2M_WORLD,
+        C3S_DWD22_TPRATE_WORLD,
+        C3S_CMCC4_T2M_WORLD,
+        C3S_CMCC4_TPRATE_WORLD,
+        C3S_NCEP2_T2M_WORLD,
+        C3S_NCEP2_TPRATE_WORLD,
+        C3S_JMA3_T2M_WORLD,
+        C3S_JMA3_TPRATE_WORLD,
+        C3S_ECCC5_T2M_WORLD,
+        C3S_ECCC5_TPRATE_WORLD,
+        C3S_BOM2_T2M_WORLD,
+        C3S_BOM2_TPRATE_WORLD,
+    ]
+    
+    for cls in classes:
+        c3s = cls(download_from_source=True, date_from='1995-01-01')
+        c3s.retrieve_store_upload_and_cleanup()
+   
+    # mr = MeteoRaster.load(c3s.data_index['stored_file'].iloc[-1])
     # mr.plot_mean(coastline=True, borders=True)
 
     # mr = None
