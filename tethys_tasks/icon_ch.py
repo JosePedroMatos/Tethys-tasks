@@ -87,6 +87,11 @@ def unzip_and_load_gribs_as_xarray(
 
         return decoded[variable]
 
+
+CLOUD_TEMPLATE_ = 'forecasts/ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
+LOCAL_PATH_TEMPLATE_ = 'ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
+STORAGE_PATH_TEMPLATE_ = 'ICON_CH2/icon_ch2_{self._variable_lower}/%Y/tethys_icon_ch2_{{floor_7_days}}.nct'
+
 class ICON_CH2_EPS_TOT_PREC(BaseTask):
     '''
     Docstring for GFS ICON_CH2_EPS
@@ -100,12 +105,12 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=6)
         LEADTIMES = pd.timedelta_range('0h', '120h', freq='1h')
 
-        CLOUD_TEMPLATE = 'forecasts/ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_%Y.%m.%d_%H.zip'
-        LOCAL_PATH_TEMPLATE = 'ICON_CH2{self._variable}/%Y/%m/%d/icon_ch2_%Y.%m.%d_%H.zip'
-        STORAGE_PATH_TEMPLATE = 'ICON_CH2/icon_ch2_{self._variable_lower}/%Y/tethys_icon_ch2_{{floor_7_days}}.nct'
+        CLOUD_TEMPLATE = CLOUD_TEMPLATE_
+        LOCAL_PATH_TEMPLATE = LOCAL_PATH_TEMPLATE_
+        STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=10)
-        ASSUME_LOCAL_COMPLETE = False
+        ASSUME_LOCAL_COMPLETE = True
 
         PIXEL_SIZE = 0.25
 
@@ -259,10 +264,12 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
             return False
 
         # Define what files to download (each download should be complete)
-        to_download_files = self.data_index.groupby('local_file').first()
-        to_download_files = to_download_files.loc[to_download_files.production_datetime>=pd.Timestamp.utcnow().tz_localize(None) - self._publication_memory]
+        to_download_files = self.data_index.loc[~self.data_index['local_file_complete'], :]
+        to_download_files = to_download_files.groupby('local_file').first()
+        to_download_files = to_download_files.loc[to_download_files.production_datetime>=pd.Timestamp.now('UTC').tz_localize(None) - self._publication_memory]
 
         # Download
+        downloaded = False
         for download_file, associated_data in to_download_files.iterrows():
             try:
                 self.__download_helper(leadtimes, associated_data.production_datetime, download_file)
@@ -293,18 +300,30 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
 class ICON_CH2_EPS_T2M(ICON_CH2_EPS_TOT_PREC):
     
     with CaptureNewVariables() as _ICON_CH2_EPS_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
-        CLOUD_TEMPLATE = 'test/ICON_CH2/%Y/%m/%d/icon_ch2_%Y.%m.%d_%H.zip'
-        LOCAL_PATH_TEMPLATE = 'ICON_CH2/%Y/%m/%d/icon_ch2_%Y.%m.%d_%H.zip'
-        STORAGE_PATH_TEMPLATE = 'ICON_CH2/icon_ch2_{self._variable_lower}/%Y/tethys_icon_ch2_{{floor_7_days}}.nct'
+        CLOUD_TEMPLATE = CLOUD_TEMPLATE_
+        LOCAL_PATH_TEMPLATE = LOCAL_PATH_TEMPLATE_
+        STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_
 
         VARIABLE = 'T_2M'
+        VARIABLE_LOWER = VARIABLE.lower()
+
+class ICON_CH2_EPS_SWE(ICON_CH2_EPS_TOT_PREC):
+    
+    with CaptureNewVariables() as _ICON_CH2_EPS_SWE_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        CLOUD_TEMPLATE = CLOUD_TEMPLATE_
+        LOCAL_PATH_TEMPLATE = LOCAL_PATH_TEMPLATE_
+        STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_
+
+        VARIABLE = 'W_SNOW'
         VARIABLE_LOWER = VARIABLE.lower()
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = ICON_CH2_EPS_T2M(download_from_source=True, date_from='2026-03-12 12:00:00')
+    task = ICON_CH2_EPS_TOT_PREC(download_from_source=True, date_from='2026-03-12 12:00:00')
+    # task = ICON_CH2_EPS_T2M(download_from_source=True, date_from='2026-03-12 12:00:00')
+    # task = ICON_CH2_EPS_SWE(download_from_source=True, date_from='2026-03-12 12:00:00')
     # task._update_index_and_completeness()
 
     # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
