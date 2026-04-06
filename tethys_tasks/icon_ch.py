@@ -11,8 +11,10 @@ if _LOCAL_ECCODES_DEFINITIONS.exists():
     os.environ.setdefault('ECCODES_DEFINITION_PATH', str(_LOCAL_ECCODES_DEFINITIONS))
 
 from meteodatalab import data_source, grib_decoder, ogd_api
+from meteodatalab.operators import time_operators, regrid
+from rasterio.crs import CRS
 from earthkit.data import config
-config.set('cache-policy', 'temporary')
+config.set('cache-policy', 'user')
 
 import numpy as np
 import xarray as xr
@@ -29,64 +31,9 @@ from zipfile import ZIP_LZMA, ZipFile
 from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 from uuid import uuid4
 from typing import Tuple
+import gc
 
 _GRIB_EXTENSIONS = {'.grib', '.grib2', '.grb'}
-
-def unzip_and_load_gribs_as_xarray(
-    zip_path: str | Path,
-    variable: str,
-) -> xr.DataArray:
-    """Extract a GRIB zip archive and decode the requested variable to xarray."""
-    zip_path = Path(zip_path)
-    if not zip_path.exists():
-        raise FileNotFoundError(zip_path)
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        with ZipFile(zip_path, mode='r') as zf:
-            zf.extractall(tmp_path)
-
-        grib_files = sorted(
-            p for p in tmp_path.rglob('*')
-            if p.is_file() and p.suffix.lower() in _GRIB_EXTENSIONS
-        )
-        if not grib_files:
-            raise RuntimeError(f'No GRIB files found in archive {zip_path}.')
-
-        horizontal_files = [
-            p for p in grib_files if p.name.startswith('horizontal_constants_')
-        ]
-        if not horizontal_files:
-            raise RuntimeError('No horizontal constants file found in archive.')
-
-        coord_source = data_source.FileDataSource(
-            datafiles=[str(p) for p in horizontal_files]
-        )
-        coord_fields = grib_decoder.load(
-            coord_source,
-            {'param': ['CLON', 'CLAT']},
-            geo_coords=lambda _: {},
-        )
-        geo_coords = {
-            'lon': coord_fields['CLON'].squeeze(),
-            'lat': coord_fields['CLAT'].squeeze(),
-        }
-
-        source = data_source.FileDataSource(datafiles=[str(p) for p in grib_files])
-        decoded = grib_decoder.load(
-            source,
-            {'param': variable},
-            geo_coords=lambda _: geo_coords,
-        )
-
-        if variable not in decoded:
-            available = ', '.join(sorted(decoded.keys()))
-            raise KeyError(
-                f'Variable {variable} not found in archive. Available variables: {available}'
-            )
-
-        return decoded[variable]
-
 
 CLOUD_TEMPLATE_ = 'forecasts/ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
 LOCAL_PATH_TEMPLATE_ = 'ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
@@ -98,6 +45,14 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
 
     https://colab.research.google.com/github/MeteoSwiss/opendata-nwp-demos/blob/main/01_retrieve_process_precip.ipynb#scrollTo=TvqLrOwV0OBm
     '''
+
+    # xmin, xmax = -0.817, 18.183   # Longitude bounds
+    # ymin, ymax = 41.183, 51.183   # Latitude bounds
+    xmin, xmax = -0.800, 18.150   # Longitude bounds
+    ymin, ymax = 41.200, 51.150   # Latitude bounds
+    delta_xy = 0.025              # Cell size ()
+    nx = int(np.round((xmax - xmin)/delta_xy + 1, 6))
+    ny = int(np.round((ymax - ymin)/delta_xy + 1, 6))
 
     with CaptureNewVariables() as _ICON_CH2_EPS_TOT_PREC_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         PUBLICATION_LATENCY = pd.Timedelta(hours=3)
@@ -125,10 +80,16 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
                      W_SNOW='mm',
                      U_10M='m/s',
                      V_10M='m/s',
-
                      )
 
+        TRANSFORMATIONS = dict(T_2M=lambda x: x-273.15,
+                               )
+
+        POSITIVE = ['TOT_PREC']
+        CUMULATIVE = ['TOT_PREC']
+        DESTINATION = regrid.RegularGrid(CRS.from_string("epsg:4326"), nx, ny, xmin, xmax, ymin, ymax)
         COLLECTION = 'ogd-forecasting-icon-ch2'
+
         VARIABLE = 'TOT_PREC'
         VARIABLE_LOWER = VARIABLE.lower()
 
@@ -286,16 +247,118 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
 
         self.diag(f'            Reading "{local_file}" ({self.__class__.__name__})', 1)
 
-        data, units = self._read_local(
-            local_file,
-            self._variable,
-            self._backend_kwargs,
-            self._grib_variable,
-            self._leadtimes,
-            self._units,
-        )
-        mr = MeteoRaster(data=data, units=units, variable=self._variable, verbose=False)
-        return mr
+        tmp_path = Path(tempfile.mkdtemp(prefix='icon_ch_read_'))
+        coord_source = None
+        coord_fields = None
+        source = None
+        decoded = None
+        data_regular = None
+        geo_coords = None
+        grib_files = None
+        data = None
+
+        try:
+            with ZipFile(local_file, mode='r') as zf:
+                zf.extractall(tmp_path)
+
+            grib_files = sorted(
+                p for p in tmp_path.rglob('*')
+                if p.is_file() and p.suffix.lower() in _GRIB_EXTENSIONS
+            )
+            if not grib_files:
+                raise RuntimeError(f'No GRIB files found in archive {local_file}.')
+
+            horizontal_files = [
+                p for p in self._permanent_files if p.name.startswith('horizontal_constants_') and p.suffix.lower() in _GRIB_EXTENSIONS
+            ]
+
+            coord_source = data_source.FileDataSource(
+                datafiles=[str(p) for p in horizontal_files]
+            )
+            coord_fields = grib_decoder.load(
+                coord_source,
+                {'param': ['CLON', 'CLAT']},
+                geo_coords=lambda _: {},
+            )
+            geo_coords = {
+                'lon': coord_fields['CLON'].squeeze(),
+                'lat': coord_fields['CLAT'].squeeze(),
+            }
+
+            source = data_source.FileDataSource(datafiles=[str(p) for p in grib_files])
+            decoded = grib_decoder.load(
+                source,
+                {'param': self._variable},
+                geo_coords=lambda _: geo_coords,
+            )
+
+            if self._variable not in decoded:
+                available = ', '.join(sorted(decoded.keys()))
+                raise KeyError(
+                    f'Variable {self._variable} not found in archive. Available variables: {available}'
+                )
+
+            if self._variable in self._cumulative:
+                data = time_operators.delta(decoded[self._variable], np.timedelta64(1, 'h'))
+                if 'lead_time' in data.coords:
+                    data = data.where(data['lead_time'] > np.timedelta64(0, 'h'), drop=True)
+            else:
+                data = decoded[self._variable]
+
+            # Pull all values in-memory before touching temp cleanup.
+            data = data.load()
+
+            self.diag(f'            Converting to regular grid "{local_file}" ({self.__class__.__name__})', 1)
+            data_regular = regrid.iconremap(data, self._destination).load()
+
+            self.diag(f'            Creating Meteoraster "{local_file}" ({self.__class__.__name__})', 1)
+            values = np.asarray(data_regular.data[...])
+            if self._variable in self._transformations:
+                values = self._transformations[self._variable](values)
+            if self._variable in self._positive:
+                values = np.maximum(0, values)
+
+            mr_data = dict(
+                data=values,
+                production_datetime=pd.to_datetime(np.asarray(data_regular.ref_time.data[...])),
+                leadtimes=pd.to_timedelta(np.asarray(data_regular.lead_time.data[...])) - pd.Timedelta('1h'),
+                latitudes=np.asarray(data_regular.lat.data[...]),
+                longitudes=np.asarray(data_regular.lon.data[...]),
+            )
+
+            return MeteoRaster(
+                data=mr_data,
+                units=self._units[self._variable],
+                variable=self._variable,
+                verbose=False,
+            )
+        finally:
+            decoded = None
+            source = None
+            coord_fields = None
+            coord_source = None
+            data_regular = None
+            geo_coords = None
+            grib_files = None
+            data = None
+            gc.collect()
+
+            # WinError 32 is transient for GRIB/cached readers; retry and continue if still locked.
+            for _ in range(12):
+                try:
+                    shutil.rmtree(tmp_path)
+                    break
+                except (PermissionError, OSError):
+                    time.sleep(0.25)
+            else:
+                self.diag(f'        Temporary folder still locked, leaving it: {tmp_path}', 1)
+
+    def _read_local_leadtime(self, local_leadtime_file: Path):
+        '''
+        
+        '''
+
+        raise NotImplementedError
 
 class ICON_CH2_EPS_T2M(ICON_CH2_EPS_TOT_PREC):
     
@@ -321,7 +384,7 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = ICON_CH2_EPS_TOT_PREC(download_from_source=True, date_from='2026-03-12 12:00:00')
+    task = ICON_CH2_EPS_TOT_PREC(download_from_source=False, date_from='2026-03-12 12:00:00')
     # task = ICON_CH2_EPS_T2M(download_from_source=True, date_from='2026-03-12 12:00:00')
     # task = ICON_CH2_EPS_SWE(download_from_source=True, date_from='2026-03-12 12:00:00')
     # task._update_index_and_completeness()
