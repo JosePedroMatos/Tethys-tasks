@@ -70,11 +70,6 @@ class GFS_025(BaseTask):
     def _floor_year(self, production_datetime):
         reference = pd.Timestamp('1900-01-01')
         step = pd.Timedelta(days=7)
-        return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
-
-    def _floor_year(self, production_datetime):
-        reference = pd.Timestamp('1900-01-01')
-        step = pd.Timedelta(days=365)
         return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y')
 
     def _leadtime_hours(self, leadtime):
