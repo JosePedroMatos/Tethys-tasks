@@ -154,7 +154,17 @@ class CompletenessIndex():
                 self.index.to_csv(self.index_file, sep=',')
         except Exception as ex:
             print(f'Update of completeness index failed: {self.index_file.parent.absolute()} ({ex}).')
-            
+
+    def erase(self):
+        '''
+        Erases the file and resets the index.
+        '''
+        
+        if self.index_file.exists():
+            self.index_file.unlink()
+        
+        self = CompletenessIndex(self.folder)
+        
 
     def remove(self, files:Iterable):
         for f0 in files:

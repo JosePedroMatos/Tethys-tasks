@@ -31,13 +31,12 @@ from zipfile import ZIP_LZMA, ZipFile
 from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 from uuid import uuid4
 from typing import Tuple
-import gc
 
 _GRIB_EXTENSIONS = {'.grib', '.grib2', '.grb'}
 
-CLOUD_TEMPLATE_ = 'forecasts/ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
+CLOUD_TEMPLATE_ = 'ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
 LOCAL_PATH_TEMPLATE_ = 'ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
-STORAGE_PATH_TEMPLATE_ = 'ICON_CH2/icon_ch2_{self._variable_lower}/%Y/tethys_icon_ch2_{{floor_7_days}}.nct'
+STORAGE_PATH_TEMPLATE_ = 'ICON_CH2/icon_ch2_{self._variable_lower}/{{floor_year}}/tethys_icon_ch2_{{floor_7_days}}.nct'
 
 class ICON_CH2_EPS_TOT_PREC(BaseTask):
     '''
@@ -50,7 +49,7 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
     # ymin, ymax = 41.183, 51.183   # Latitude bounds
     xmin, xmax = -0.800, 18.150   # Longitude bounds
     ymin, ymax = 41.200, 51.150   # Latitude bounds
-    delta_xy = 0.025              # Cell size ()
+    delta_xy = 0.05              # Cell size ()
     nx = int(np.round((xmax - xmin)/delta_xy + 1, 6))
     ny = int(np.round((ymax - ymin)/delta_xy + 1, 6))
 
@@ -65,7 +64,7 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
         STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=10)
-        ASSUME_LOCAL_COMPLETE = True
+        ASSUME_LOCAL_COMPLETE = False
 
         PIXEL_SIZE = 0.25
 
@@ -87,20 +86,36 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
 
         POSITIVE = ['TOT_PREC']
         CUMULATIVE = ['TOT_PREC']
+        
         DESTINATION = regrid.RegularGrid(CRS.from_string("epsg:4326"), nx, ny, xmin, xmax, ymin, ymax)
         COLLECTION = 'ogd-forecasting-icon-ch2'
 
         VARIABLE = 'TOT_PREC'
         VARIABLE_LOWER = VARIABLE.lower()
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # If the variable is cumulative, there is one less leadtime (at the end)
+        if self._variable in self._cumulative:
+            self._leadtimes = self._leadtimes[:-1]
+
+            self.data_index = self.data_index.loc[self.data_index['leadtime'].isin(self._leadtimes), :]
+
     def _7_days(self, production_datetime):
         reference = pd.Timestamp('1900-01-01')
         step = pd.Timedelta(days=7)
         return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
 
+    def _floor_year(self, production_datetime):
+        reference = pd.Timestamp('1900-01-01')
+        step = pd.Timedelta(days=7)
+        return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y')
+
     def populate(self, *args, **kwargs):
         # Add each 7 days (floor_7_days)
         additional_columns = {'floor_7_days': lambda x: self._7_days(x['production_datetime']),
+                              'floor_year': lambda x: self._floor_year(x['production_datetime']),
                               }
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
@@ -216,7 +231,10 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
         self.diag('    Download from source...', 1)
 
         # Define leadtimes
-        leadtimes = self.__to_ogd_api_leadtimes(self._leadtimes)
+        leadtimes = self._leadtimes.copy().tolist()
+        if self._variable in self._cumulative:
+            leadtimes.append(leadtimes[-1] + pd.Timedelta('1h'))
+        leadtimes = self.__to_ogd_api_leadtimes(leadtimes)
 
         # Check if there is a need to download
         to_download = self.data_index.loc[~self.data_index['data_exists'], :]
@@ -247,16 +265,22 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
 
         self.diag(f'            Reading "{local_file}" ({self.__class__.__name__})', 1)
 
-        tmp_path = Path(tempfile.mkdtemp(prefix='icon_ch_read_'))
-        coord_source = None
-        coord_fields = None
-        source = None
-        decoded = None
-        data_regular = None
-        geo_coords = None
-        grib_files = None
-        data = None
+        tmp_prefix='icon_ch_read_'
 
+        temp_root = Path(tempfile.gettempdir())
+        stale_before = time.time() - 3600
+        for stale_dir in temp_root.iterdir():
+            try:
+                if not stale_dir.is_dir() or not stale_dir.name.startswith(tmp_prefix):
+                    continue
+                if stale_dir.stat().st_mtime >= stale_before:
+                    continue
+
+                shutil.rmtree(stale_dir)
+            except Exception:
+                pass
+
+        tmp_path = Path(tempfile.mkdtemp(prefix=tmp_prefix))
         try:
             with ZipFile(local_file, mode='r') as zf:
                 zf.extractall(tmp_path)
@@ -268,13 +292,14 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
             if not grib_files:
                 raise RuntimeError(f'No GRIB files found in archive {local_file}.')
 
+            # these are kept in the permanent folder.
             horizontal_files = [
                 p for p in self._permanent_files if p.name.startswith('horizontal_constants_') and p.suffix.lower() in _GRIB_EXTENSIONS
             ]
-
             coord_source = data_source.FileDataSource(
-                datafiles=[str(p) for p in horizontal_files]
+                datafiles = [str(p) for p in horizontal_files]
             )
+
             coord_fields = grib_decoder.load(
                 coord_source,
                 {'param': ['CLON', 'CLAT']},
@@ -285,7 +310,7 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
                 'lat': coord_fields['CLAT'].squeeze(),
             }
 
-            source = data_source.FileDataSource(datafiles=[str(p) for p in grib_files])
+            source = data_source.FileDataSource(datafiles = [str(p) for p in grib_files])
             decoded = grib_decoder.load(
                 source,
                 {'param': self._variable},
@@ -318,10 +343,31 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
             if self._variable in self._positive:
                 values = np.maximum(0, values)
 
+            # Render dimensions compatible
+            if values.shape[1]>1:
+                raise Exception(f'Expecting a single ensemble member {Path(local_file).name} ({self.__class__.__name__}).')
+
+            if self._variable_upper == 'TOT_PREC':
+                pass
+            elif self._variable_upper == 'T_2M':
+                if values.shape[3]>1:
+                    raise Exception(f'Expecting a single vertical level {Path(local_file).name} ({self.__class__.__name__}).')
+                values = values[:, :, :, 0, ...] # Remove the vertical level dimension
+            elif self._variable_upper == 'W_SNOW':
+                pass
+            else:
+                raise Exception(f'Variable {self._variable} not supported for dimension rendering {Path(local_file).name} ({self.__class__.__name__}).')
+
+
+            if self._variable in self._cumulative:
+                leadtimes = pd.to_timedelta(np.asarray(data_regular.lead_time.data[...])) - pd.Timedelta('1h')
+            else:
+                leadtimes = pd.to_timedelta(np.asarray(data_regular.lead_time.data[...]))
+
             mr_data = dict(
                 data=values,
                 production_datetime=pd.to_datetime(np.asarray(data_regular.ref_time.data[...])),
-                leadtimes=pd.to_timedelta(np.asarray(data_regular.lead_time.data[...])) - pd.Timedelta('1h'),
+                leadtimes=leadtimes,
                 latitudes=np.asarray(data_regular.lat.data[...]),
                 longitudes=np.asarray(data_regular.lon.data[...]),
             )
@@ -332,33 +378,46 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
                 variable=self._variable,
                 verbose=False,
             )
-        finally:
-            decoded = None
-            source = None
-            coord_fields = None
-            coord_source = None
-            data_regular = None
-            geo_coords = None
-            grib_files = None
-            data = None
-            gc.collect()
-
-            # WinError 32 is transient for GRIB/cached readers; retry and continue if still locked.
-            for _ in range(12):
-                try:
-                    shutil.rmtree(tmp_path)
-                    break
-                except (PermissionError, OSError):
-                    time.sleep(0.25)
-            else:
-                self.diag(f'        Temporary folder still locked, leaving it: {tmp_path}', 1)
-
-    def _read_local_leadtime(self, local_leadtime_file: Path):
-        '''
         
+        except Exception as ex:
+            raise
+
+        finally:
+            for path in sorted(tmp_path.rglob('*'), reverse=True):
+                try:
+                    if path.is_file():
+                        path.unlink()
+                    elif path.is_dir():
+                        path.rmdir()
+                except Exception:
+                    pass
+
+            try:
+                tmp_path.rmdir()
+            except Exception:
+                pass
+
+    def read_local_completeness(self, local_file:str) -> pd.DataFrame:
+        '''
+        Returns a pd.Series with the valid steps of a local file
+        [production_datetime  leadtime] [Bool]
+
+        In this case, if the file exists inside the zip, it can be assumed to be complete.
         '''
 
-        raise NotImplementedError
+        valid_steps = self.data_index.loc[self.data_index['local_file']==local_file, 'data_exists'].copy()
+        valid_steps[:] = False
+        
+        # Check the files stored inside the local zip file. If the expected files are there, we can assume the data is complete (since we download complete files verified by SHA256).
+        with ZipFile(local_file, mode='r') as zf:
+            # Retrieve the list of files inside the zip
+            zip_file_list = zf.namelist()
+        
+        separator = valid_steps.index[0][0].strftime(format='-%Y%m%d%H%M-')
+        leadtimes = pd.to_timedelta([pd.Timedelta(hours=int(f.split(separator)[1].split('-')[0])) for f in zip_file_list]).sort_values()   
+        valid_steps.loc[valid_steps.index.get_level_values('leadtime').isin(leadtimes)] = True
+
+        return valid_steps
 
 class ICON_CH2_EPS_T2M(ICON_CH2_EPS_TOT_PREC):
     
@@ -384,25 +443,36 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    task = ICON_CH2_EPS_TOT_PREC(download_from_source=False, date_from='2026-03-12 12:00:00')
-    # task = ICON_CH2_EPS_T2M(download_from_source=True, date_from='2026-03-12 12:00:00')
-    # task = ICON_CH2_EPS_SWE(download_from_source=True, date_from='2026-03-12 12:00:00')
+    date_from = '2026-04-07 12:00:00'
+
+    task = ICON_CH2_EPS_TOT_PREC(download_from_source=True, date_from=date_from)
+    task.update()
+
+    task = ICON_CH2_EPS_T2M(download_from_source=True, date_from=date_from)
+    task.update()
+
+    task = ICON_CH2_EPS_SWE(download_from_source=True, date_from=date_from)
+    task.update()
+
     # task._update_index_and_completeness()
 
     # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
 
-    task.retrieve_store_upload_and_cleanup()
+    # task.retrieve_store_upload_and_cleanup()
 
-    # # files = task.data_index['stored_file'].unique()
+    files = task.data_index['stored_file'].unique()
     # files = task.data_index.loc[task.data_index['stored_file_exists'], 'stored_file'].unique()
     # mr = None
     # for mr0 in files:
-    #     if mr is None:
-    #         mr = MeteoRaster.load(mr0)
-    #     else:
-    #         mr.join(MeteoRaster.load(mr0))
-    # # mr.plot_mean(coastline=True, borders=True)
-    # mr.get_values_from_latlon_by_event(mr.get_values_from_latlon(42.5,42.5)).bfill(axis=1).iloc[:, 0].plot()
+    #     try:
+    #         if mr is None:
+    #             mr = MeteoRaster.load(mr0)
+    #         else:
+    #             mr.join(MeteoRaster.load(mr0))
+    #     except Exception as ex:
+    #         print(f'Problem loading {mr0}: {ex}')
+    # mr.plot_mean(coastline=True, borders=True)
+    # mr.get_values_from_latlon_by_event(mr.get_values_from_latlon(46.3,7.6)).bfill(axis=1).iloc[:, 0].plot()
 
     # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-01-01')    
     # task.retrieve_and_upload()

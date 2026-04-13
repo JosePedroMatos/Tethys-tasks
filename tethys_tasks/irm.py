@@ -26,9 +26,9 @@ class ALARO40L_T2M(BaseTask):
 
         SOURCE_PARALLEL_TRANSFERS = 1 # It is extremely fast. No need for parallel.
 
-        CLOUD_TEMPLATE = 'test/ALARO_IRM/%Y/%m/alaro40l_%Y%m%d%H.zip'
+        CLOUD_TEMPLATE = 'ALARO_IRM/%Y/%m/alaro40l_%Y%m%d%H.zip'
         LOCAL_PATH_TEMPLATE = 'ALARO_IRM/%Y/%m/alaro40l_%Y%m%d%H.zip'
-        STORAGE_PATH_TEMPLATE = 'ALARO_IRM/alaro40l_{self._variable}/%Y/tethys_alaro40l_{self._variable}_{{floor_7_days}}.nct'
+        STORAGE_PATH_TEMPLATE = 'ALARO_IRM/alaro40l_{self._variable}/{{floor_year}}/tethys_alaro40l_{self._variable}_{{floor_7_days}}.nct'
 
         DOWNLOAD_TEMPLATE = 'https://opendata.meteo.be/ftp/forecasts/alaro_40l/%Y%m%d%H/{file}'
 
@@ -57,9 +57,16 @@ class ALARO40L_T2M(BaseTask):
         step = pd.Timedelta(days=7)
         return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
 
+    @staticmethod
+    def _floor_year(production_datetime):
+        reference = pd.Timestamp('1900-01-01')
+        step = pd.Timedelta(days=7)
+        return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y')
+
     def populate(self, *args, **kwargs):
         # Add each 7 days (floor_7_days)
         additional_columns = {'floor_7_days': lambda x: self._7_days(x['production_datetime']),
+                              'floor_year': lambda x: self._floor_year(x['production_datetime']),   
                               }
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
@@ -291,10 +298,10 @@ if __name__=='__main__':
     plt.ion()
 
     # alaro = ALARO40L_T2M(download_from_source=True, date_from='2026-03-13')
-    alaro = ALARO40L_TP(download_from_source=True, date_from='2025-10-01')
+    alaro = ALARO40L_TP(download_from_source=True, date_from='2026-04-01')
     # mr = alaro.read_local('tests/data/ALARO/2026012900.zip')
     
-    alaro.retrieve_store_and_upload()
+    alaro.update()
 
     # alaro.retrieve_and_upload()
     # alaro.retrieve()

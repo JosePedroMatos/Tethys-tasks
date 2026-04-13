@@ -32,13 +32,14 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
 
         C3S_SYSTEM = '51'
         ORIGINATING_CENTRE = 'ecmwf'
+        MISSING_YEARS = [i for i in range(1970, 1981)]
         PIXEL_SIZE = 1
         VARIABLE='t2m'
         ZONE='world'
 
         ASSUME_LOCAL_COMPLETE = True
 
-        CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
+        CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
 
@@ -102,7 +103,11 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
             Path(local_path).parent.mkdir(parents=True, exist_ok=True)
 
             date = template_row['production_datetime'].replace(day=1, hour=0)
-            days = ['%02d' % d for d in range(1, calendar.monthrange(date.year, date.month)[1]+1)]
+            
+            if date.year in self._missing_years:
+                self.diag(f'        Skipping due to missing year: {date.strftime("%Y-%m")} ({self.__class__.__name__}).', 1)
+                continue
+            
             options = {'data_format': 'grib',
                        'year': [f'{date.year}'],
                        'month': [f'{date.month:02d}'],
@@ -127,6 +132,7 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
                 state, local_path_ = future.result()
                 if state:
                     self.data_index.loc[self.data_index['local_file']==local_path_, 'local_file_exists'] = True
+                    self.diag(f'            Downloaded "{local_path_}" ({self.__class__.__name__})', 1)
                     downloaded = True
                 else:
                     print(f'Download failed: {Path(local_path_).name}')
@@ -206,6 +212,7 @@ class C3S_UKMO604_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '604'
         ORIGINATING_CENTRE = 'ukmo'
+        MISSING_YEARS = [i for i in range(1970, 1993)] + [i for i in range(2017, 2025)] 
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -222,6 +229,7 @@ class C3S_MF9_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '9'
         ORIGINATING_CENTRE = 'meteo_france'
+        MISSING_YEARS = [i for i in range(1970, 1993)]
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -238,6 +246,7 @@ class C3S_DWD22_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '22'
         ORIGINATING_CENTRE = 'dwd'
+        MISSING_YEARS = [i for i in range(1970, 1993)] + [i for i in range(2024, 2025)] 
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -254,6 +263,7 @@ class C3S_CMCC4_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '4'
         ORIGINATING_CENTRE = 'cmcc'
+        MISSING_YEARS = [] 
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -270,6 +280,7 @@ class C3S_NCEP2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '2'
         ORIGINATING_CENTRE = 'NCEP'
+        MISSING_YEARS = [i for i in range(1970, 1993)] + [i for i in range(2017, 2019)] 
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -286,6 +297,7 @@ class C3S_JMA3_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '3'
         ORIGINATING_CENTRE = 'jma'
+        MISSING_YEARS = [i for i in range(1970, 1993)]
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -302,6 +314,7 @@ class C3S_ECCC5_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '5'
         ORIGINATING_CENTRE = 'eccc'
+        MISSING_YEARS = [i for i in range(1970, 1993)]
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -318,6 +331,7 @@ class C3S_BOM2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
         C3S_SYSTEM = '2'
         ORIGINATING_CENTRE = 'bom'
+        MISSING_YEARS = [i for i in range(1970, 1993)] + [i for i in range(2019, 2025)] 
 
         CLOUD_TEMPLATE = f'forecasts/C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -355,8 +369,9 @@ if __name__=='__main__':
     
     for cls in classes:
         try:
-            c3s = cls(download_from_source=True, date_from='1994-01-01')
-            c3s.retrieve_store_upload_and_cleanup()
+            print(f'Processing {cls.__name__}...')
+            c3s = cls(download_from_source=True, date_from='2026-01-01')
+            c3s.update()
         except Exception as ex:
             pass
 
