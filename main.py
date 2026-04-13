@@ -4,11 +4,12 @@ import sys
 import json
 import os
 from dotenv import load_dotenv
-from tethys_tasks.base import BaseTask
-import tethys_tasks
 
 # Load environment variables from .env if it exists
 load_dotenv()
+
+from tethys_tasks.base import BaseTask
+import tethys_tasks
 
 def main():
     parser = argparse.ArgumentParser(description='Tethys Task Runner')

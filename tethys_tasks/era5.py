@@ -22,11 +22,13 @@ class ERA5(BaseTask):
     with CaptureNewVariables() as _ERA5_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         PUBLICATION_LATENCY = pd.Timedelta(days=5)
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=1)
-        LEADTIMES = pd.timedelta_range('0d', '0d', freq='1h')
+        LEADTIMES = pd.timedelta_range('0D', '0D', freq='1h')
 
         SOURCE_PARALLEL_TRANSFERS = 3
 
         PIXEL_SIZE = 0.1
+
+        ASSUME_LOCAL_COMPLETE = False
 
         CLOUD_TEMPLATE = 'test/ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
         LOCAL_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
@@ -52,7 +54,7 @@ class ERA5(BaseTask):
             t2m=False,
         )
 
-        FAIL_IF_OLDER = pd.Timedelta('8d')
+        FAIL_IF_OLDER = pd.Timedelta('8D')
 
     def __init__(self, *args, **kwargs):
 
@@ -300,7 +302,7 @@ class ERA5(BaseTask):
             data['production_datetime'] -= data['production_datetime'][1] - data['production_datetime'][0]
         
         data['data'] = np.expand_dims(data['data'], [1, 2])
-        data['leadtimes'] = np.array([pd.Timedelta('0d')])
+        data['leadtimes'] = np.array([pd.Timedelta('0D')])
                 
         tmp = MeteoRaster(data, units=units, variable=self._variable, verbose=False)
         tmp.trim()
@@ -378,53 +380,6 @@ class ERA5(BaseTask):
 
 # creates regional classes such as ERA5_CAUCASUS_TP, ERA5_CAUCASUS_T2M, TAJIKISTAN_T2M, etc...
 create_kml_classes(ERA5, {'VARIABLE': ['tp', 't2m', 'sd']})
-
-#region utility_functions
-
-# def removes_file_from_zip(folder:str):
-
-#     files = Path(folder).rglob('*.zip')
-#     for file in files:
-#         with ZipFile(file, 'r') as zip_read:
-#             namelist = zip_read.namelist()
-            
-#             # Check if data.grib exists
-#             if 'data.grib' not in namelist or len(namelist)==1:
-#                 continue
-            
-#             # Create temporary file for the new zip
-#             with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-#                 temp_path = temp_file.name
-            
-#             try:
-#                 # Write only data.grib to new zip
-#                 with ZipFile(temp_path, 'w') as zip_write:
-#                     zip_write.writestr('data.grib', zip_read.read('data.grib'))
-                
-#                 # Replace original file using shutil for cross-drive compatibility
-#                 shutil.move(temp_path, file)
-#                 print(file)
-#             except Exception as ex:
-#                 print(f'Error processing {file}: {ex}')
-#                 Path(temp_path).unlink(missing_ok=True)
-
-# def rename_lowercase(folder:str):
-
-#     files = [i for i in Path(folder).rglob('*.zip')]
-#     for file in files[::-1]:
-#         new_name = file.parent / file.name.lower()
-#         tmp_file = file.parent / (new_name.name + '_')
-#         if file.name != new_name.name:
-#             try:
-#                 file.rename(tmp_file)
-#                 tmp_file.rename(new_name)
-#                 print(f'Renamed {file} to {new_name}')
-#             except Exception as ex:
-#                 print(f'Error renaming {file}: {ex}')
-
-#endregion
-
-
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt

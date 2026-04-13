@@ -31,12 +31,12 @@ class GPM_IMERG_FINAL(BaseTask):
 
         # URL Pattern: https://jsimpsonhttps.pps.eosdis.nasa.gov/imerg/late/{YYYY}/{MM}/3B-HHR-L.MS.MRG.3IMERG.{YYYYMMDD}-S{HHMMSS}-E{HHMMSS}.{m}.V07B.HDF5
         
-        FILE_TEMPLATE = '3B-HHR.MS.MRG.3IMERG.%Y%m%d-S%H%M%S-E{{end_str}}.{{dly_mins}}.V07B.HDF5.nc4'
+        FILE_TEMPLATE = '3B-HHR.MS.MRG.3IMERG.%Y%m%d-S%H%M%S-E{{end_str}}.{{dly_mins}}.{{version}}.HDF5.nc4'
 
         DOWNLOAD_TEMPLATE = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/GPM_L3/GPM_3IMERGHH.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
         CLOUD_TEMPLATE = 'IMERG_FINAL/%Y/%j/' + FILE_TEMPLATE
         LOCAL_PATH_TEMPLATE = 'IMERG_FINAL/%Y/%m/%d/' + FILE_TEMPLATE
-        STORAGE_PATH_TEMPLATE = 'IMERG_FINAL/imerg_final_{self._zone}/%Y/%m/tethys_imerg_final_{{floor_7_days}}.nct'
+        STORAGE_PATH_TEMPLATE = 'IMERG_FINAL/imerg_final_{self._zone}/{{floor_year}}/tethys_imerg_final_{{floor_7_days}}.nct'
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=9)
         ASSUME_LOCAL_COMPLETE = True
@@ -53,6 +53,10 @@ class GPM_IMERG_FINAL(BaseTask):
         VARIABLE = 'precipitation'
         UNITS = 'mm/30min'
 
+        VERSION_DICT = {
+            '1900-01-01': 'V07B',
+            }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
                     
@@ -68,6 +72,12 @@ class GPM_IMERG_FINAL(BaseTask):
         return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
 
     @staticmethod
+    def _floor_year(production_datetime):
+        reference = pd.Timestamp('1900-01-01')
+        step = pd.Timedelta(days=7)
+        return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y')
+    
+    @staticmethod
     def _end_str(production_datetimes) -> str: 
         end_str = (production_datetimes + pd.Timedelta(seconds=1799)).dt.strftime('%H%M%S')
         return end_str
@@ -78,12 +88,22 @@ class GPM_IMERG_FINAL(BaseTask):
         dly_mins = minutes.astype(str).str.zfill(4)
         return dly_mins
 
+    @staticmethod
+    def _version(production_datetimes, version_dict) -> str:
+
+        version = pd.Series('', index=production_datetimes.index)
+        for date_str, ver in sorted(version_dict.items()):
+            version[production_datetimes >= pd.Timestamp(date_str)] = ver
+        return version
+
     def populate(self, *args, **kwargs):
         # Add end time str (end_str)
         # Add daily hours str (dly_hrs)
         additional_columns = {'end_str': lambda x: self._end_str(x['production_datetime']),
                               'dly_mins': lambda x: self._dly_mins(x['production_datetime']),
-                              'floor_7_days': lambda x: self._7_days(x['production_datetime'])
+                              'floor_7_days': lambda x: self._7_days(x['production_datetime']),
+                              'floor_year': lambda x: self._floor_year(x['production_datetime']),
+                              'version': lambda x: self._version(x['production_datetime'], self._version_dict),
                               }
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
@@ -396,14 +416,19 @@ class GPM_IMERG_LATE(GPM_IMERG_FINAL):
 
         # URL Pattern: https://gpm1.gesdisc.eosdis.nasa.gov/opendap/hyrax/GPM_L3/GPM_3IMERGHHL.07/2009/001/3B-HHR-L.MS.MRG.3IMERG.20090101-S050000-E052959.0300.V07B.HDF5.dap.nc4
         
-        FILE_TEMPLATE = '3B-HHR-L.MS.MRG.3IMERG.%Y%m%d-S%H%M%S-E{{end_str}}.{{dly_mins}}.V07B.HDF5.nc4'
+        FILE_TEMPLATE = '3B-HHR-L.MS.MRG.3IMERG.%Y%m%d-S%H%M%S-E{{end_str}}.{{dly_mins}}.{{version}}.HDF5.nc4'
 
         DOWNLOAD_TEMPLATE = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/hyrax/GPM_L3/GPM_3IMERGHHL.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
         CLOUD_TEMPLATE = 'IMERG_LATE/%Y/%j/' + FILE_TEMPLATE
         LOCAL_PATH_TEMPLATE = 'IMERG_LATE/%Y/%m/%d/' + FILE_TEMPLATE
-        STORAGE_PATH_TEMPLATE = 'IMERG_LATE/imerg_late_{self._zone}/%Y/%m/tethys_imerg_late_{{floor_7_days}}.nct'
+        STORAGE_PATH_TEMPLATE = 'IMERG_LATE/imerg_late_{self._zone}/{{floor_year}}/tethys_imerg_late_{{floor_7_days}}.nct'
 
         FAIL_IF_OLDER = pd.DateOffset(hours=18)
+
+        VERSION_DICT = {
+            '1900-01-01': 'V07B',
+            '2026-03-03': 'V07C',
+            }
 
 # creates regional classes such as GPM_IMERG_FINAL_CAUCASUS, GPM_IMERG_LATE_CAUCASUS, etc...
 create_kml_classes(GPM_IMERG_FINAL)
@@ -413,20 +438,11 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    # gpm = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
-    # alaro = ALARO40L_TP(download_from_source=True, date_from='2025-10-01')
-    # mr = alaro.read_local('tests/data/ALARO/2026012900.zip')
-    
-    # gpm.retrieve_store_and_upload()
-    # gpm.store()
+    # task = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
+    # task.retrieve_store_upload_and_cleanup()
 
-    # files = gpm.data_index.loc[gpm.data_index['stored_file_exists'], 'stored_file'].unique()
-    # mr = MeteoRaster.load(files[0])
-    # mr.plot_mean(coastline=True, vmax=5, multiplier=48)
-
-
-    gpm = GPM_IMERG_FINAL_IBERIA(download_from_source=True, date_from='2025-09-04 00:00')
-    gpm.retrieve_store_and_upload()
+    task = GPM_IMERG_LATE_CAUCASUS(download_from_source=True, date_from='2026-02-11')
+    task.update()
 
 
     pass

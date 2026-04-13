@@ -28,15 +28,10 @@ docker load -i tethys-tasks.tar
 ### Run a specific class function (built image)
 Uses the code baked into the image.
 ```bash
-docker-compose run --rm tethys-tasks C3S_ECMWF_TPRATE_IBERIA retrieve_store_and_upload --class_kwargs "{\"date_from\": \"'2025-12-01'\", \"download_from_source\": \"True\"}" 
---fun_kwargs "{}"
-
-docker-compose run --rm tethys-tasks ERA5_TP_CAUCASUS retrieve_store_upload_and_cleanup --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=True\": \"True\"}"
-
-docker-compose run --rm tethys-tasks ERA5_ZAMBEZI_TP store --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=False\": \"False\"}" 
-
-
-docker-compose run --rm tethys-tasks ALARO40L_T2M retrieve_and_upload --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=True\": \"True\"}"
+docker-compose run --rm tethys-tasks C3S_ECMWF_TPRATE_IBERIA update --class_kwargs "{\"date_from\": \"'2025-12-01'\", \"download_from_source\": \"True\"}" --fun_kwargs "{}"
+docker-compose run --rm tethys-tasks ERA5_TP_CAUCASUS update --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=True\": \"True\"}"
+docker-compose run --rm tethys-tasks ERA5_ZAMBEZI_TP update --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=False\": \"False\"}" 
+docker-compose run --rm tethys-tasks ALARO40L_T2M update --class_kwargs "{\"date_from\": \"'2026-04-01'\", \"download_from_source=True\": \"True\"}"
 ```
 
 ### Run a specific class function ("real-time code")

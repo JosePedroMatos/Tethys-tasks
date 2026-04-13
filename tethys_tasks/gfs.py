@@ -32,7 +32,7 @@ class GFS_025(BaseTask):
 
         CLOUD_TEMPLATE = 'test/NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
         LOCAL_PATH_TEMPLATE = 'NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
-        STORAGE_PATH_TEMPLATE = 'NOAA_GFS_0.25/gfs_{self._variable_lower}_{self._zone}/%Y/tethys_NOAA_GFS_0.25_{{floor_7_days}}.nct'
+        STORAGE_PATH_TEMPLATE = 'NOAA_GFS_0.25/gfs_{self._variable_lower}_{self._zone}/{{floor_year}}/tethys_NOAA_GFS_0.25_{{floor_7_days}}.nct'
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=10)
         ASSUME_LOCAL_COMPLETE = True
@@ -67,6 +67,11 @@ class GFS_025(BaseTask):
         step = pd.Timedelta(days=7)
         return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
 
+    def _floor_year(self, production_datetime):
+        reference = pd.Timestamp('1900-01-01')
+        step = pd.Timedelta(days=7)
+        return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y')
+
     def _leadtime_hours(self, leadtime):
         return (leadtime // pd.Timedelta(hours=1)).astype(str).str.zfill(3)
 
@@ -75,6 +80,7 @@ class GFS_025(BaseTask):
         # Add leadtime in 03 format hours (leadtime_hours)
         additional_columns = {'floor_7_days': lambda x: self._7_days(x['production_datetime']),
                               'leadtime_hours': lambda x: self._leadtime_hours(x['leadtime']),
+                              'floor_year': lambda x: self._floor_year(x['production_datetime']),
                               }
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
@@ -235,7 +241,7 @@ class GFS_025(BaseTask):
             raise Exception(f'Unknown file type in GFS "{local_file}": "{tmp}"')
 
         if file_type=='netcdf':
-            with xr.open_dataset(local_file, engine='netcdf4') as ds:
+            with xr.open_dataset(local_file, engine='h5netcdf') as ds:
                 # raise Exception('NetCDF support to be checked')
                 latitudes = ds.lat.data
                 longitudes = ds.lon.data
