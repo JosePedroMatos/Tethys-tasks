@@ -1,4 +1,4 @@
-from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor, create_kml_classes
+from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor, create_kml_classes, running_in_docker
 import pandas as pd
 import xarray as xr
 from pathlib import Path
@@ -9,6 +9,7 @@ import urllib.request
 import urllib.error
 import threading
 import http.cookiejar
+# import time
 from meteoraster import MeteoRaster
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -328,6 +329,20 @@ class GPM_IMERG_FINAL(BaseTask):
                 if index_existing.shape[0] > 0:
                     read_rows = list(index_existing.itertuples(index=False))
 
+                    # if running_in_docker():
+                    #     self.diag('        Running in Docker, using single process for local reads.', 1)
+                    #     for row in read_rows:
+                    #         self.diag(f'            Read "{row.local_file}" ({self.__class__.__name__})', 1)
+                    #         data_slice = self._read_local_helper(row.local_file)
+
+                    #         p_idx = prod_map[row.production_datetime]
+                    #         full_data[p_idx, 0, 0, :, :] = data_slice['data']
+                            
+                    #         self.diag('            Sleeping 2 seconds...', 1)
+                    #         time.sleep(2)
+
+                            
+                    # else:
                     with ThreadPoolExecutor(max_workers=self._local_read_processes) as executor:
                         futures = {executor.submit(self._read_local_helper, row.local_file): row for row in read_rows}
 
@@ -441,7 +456,12 @@ if __name__=='__main__':
     # task = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
     # task.retrieve_store_upload_and_cleanup()
 
-    task = GPM_IMERG_LATE_CAUCASUS(download_from_source=True, date_from='2026-02-11')
+    date_from = '2026-04-01 00:00:00'
+    # task = GPM_IMERG_LATE_BELGIUM(download_from_source=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_CAUCASUS(download_from_source=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_IBERIA(download_from_source=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_TAJIKISTAN(download_from_source=True, date_from=date_from)
+    task = GPM_IMERG_LATE_ZAMBEZI(download_from_source=True, date_from=date_from)
     task.update()
 
 

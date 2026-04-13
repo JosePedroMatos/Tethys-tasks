@@ -31,7 +31,10 @@ Uses the code baked into the image.
 docker-compose run --rm tethys-tasks C3S_ECMWF_TPRATE_IBERIA update --class_kwargs "{\"date_from\": \"'2025-12-01'\", \"download_from_source\": \"True\"}" --fun_kwargs "{}"
 docker-compose run --rm tethys-tasks ERA5_TP_CAUCASUS update --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=True\": \"True\"}"
 docker-compose run --rm tethys-tasks ERA5_ZAMBEZI_TP update --class_kwargs "{\"date_from\": \"'2025-05-01'\", \"download_from_source=False\": \"False\"}" 
-docker-compose run --rm tethys-tasks ALARO40L_T2M update --class_kwargs "{\"date_from\": \"'2026-04-01'\", \"download_from_source=True\": \"True\"}"
+docker-compose run --rm tethys-tasks  update --class_kwargs "{\"date_from\": \"'2026-04-01'\"}"
+docker-compose run --rm tethys-tasks GPM_IMERG_LATE_TAJIKISTAN update --class_kwargs "{\"date_from\": \"'2026-04-01'\"}"
+docker-compose run --rm tethys-tasks GPM_IMERG_LATE_CAUCASUS update --class_kwargs "{\"date_from\": \"'2026-04-01'\"}"
+docker-compose run --rm tethys-tasks GPM_IMERG_LATE_ZAMBEZI update --class_kwargs "{\"date_from\": \"'2026-04-01'\"}"
 ```
 
 ### Run a specific class function ("real-time code")

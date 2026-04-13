@@ -70,6 +70,11 @@ class GFS_025(BaseTask):
     def _floor_year(self, production_datetime):
         reference = pd.Timestamp('1900-01-01')
         step = pd.Timedelta(days=7)
+        return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y.%m.%d')
+
+    def _floor_year(self, production_datetime):
+        reference = pd.Timestamp('1900-01-01')
+        step = pd.Timedelta(days=365)
         return (reference + ((production_datetime - reference) // step) * step).dt.strftime('%Y')
 
     def _leadtime_hours(self, leadtime):
@@ -79,8 +84,8 @@ class GFS_025(BaseTask):
         # Add each 7 days (floor_7_days)
         # Add leadtime in 03 format hours (leadtime_hours)
         additional_columns = {'floor_7_days': lambda x: self._7_days(x['production_datetime']),
-                              'leadtime_hours': lambda x: self._leadtime_hours(x['leadtime']),
                               'floor_year': lambda x: self._floor_year(x['production_datetime']),
+                              'leadtime_hours': lambda x: self._leadtime_hours(x['leadtime']),
                               }
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
@@ -255,7 +260,23 @@ class GFS_025(BaseTask):
                 production_datetime = pd.to_datetime(np.expand_dims(ds.time.data, 0))
                 leadtimes_local = pd.to_timedelta(pd.to_datetime(np.expand_dims(ds.valid_time.data, 0))-production_datetime[0])
 
-                data_ = np.array(ds[grib_variable[variable]][...].values)
+                # Try to get the variable directly
+                var_name = grib_variable[variable]
+                if var_name not in ds.variables:
+                    # Try to find a variable with normalized name (case-insensitive, remove underscores)
+                    def normalize(name):
+                        return name.lower().replace('_', '')
+                    norm_var_name = normalize(var_name)
+                    found = None
+                    for v in ds.variables:
+                        if normalize(v) == norm_var_name:
+                            found = v
+                            break
+                    if found is not None:
+                        var_name = found
+                    else:
+                        raise KeyError(f'Variable "{var_name}" not found in dataset variables: {list(ds.variables)}')
+                data_ = np.array(ds[var_name][...].values)
 
                 if variable=='TMP':
                     data_ -= 273.15
@@ -458,12 +479,10 @@ if __name__=='__main__':
     plt.ion()
 
     # task = GFS_025_TMP_CAUCASUS(download_from_source=False, date_from='2024-01-01')
-    task = GFS_025_PRATE_CAUCASUS(download_from_source=False, date_from='2024-01-01')
-    # task._update_index_and_completeness()
+    # task = GFS_025_PRATE_CAUCASUS(download_from_source=False, date_from='2026-01-01')
+    task = GFS_025_PRATE_BELGIUM(download_from_source=False, date_from='2026-01-01')
 
-    # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
-
-    task.store()
+    task.update()
 
     # # files = task.data_index['stored_file'].unique()
     # files = task.data_index.loc[task.data_index['stored_file_exists'], 'stored_file'].unique()
