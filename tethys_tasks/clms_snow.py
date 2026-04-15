@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor, create_kml_classes
 import boto3
 import botocore.config as config_module

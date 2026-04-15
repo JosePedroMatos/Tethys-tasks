@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Météo-France AROME 0.025° variable tasks.
 
 Classes (each expands into zone-specific subclasses via create_kml_classes):
