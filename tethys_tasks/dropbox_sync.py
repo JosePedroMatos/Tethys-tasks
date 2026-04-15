@@ -35,7 +35,10 @@ def normalize_dropbox_path(path: str) -> str:
 
 def common_dropbox_root(paths: Iterable[str], fallback: str = '/') -> str:
 	normalized_paths = [normalize_dropbox_path(path) for path in paths if str(path).strip()]
-	return normalize_dropbox_path(posixpath.commonpath(normalized_paths))
+	common_path = posixpath.commonpath(normalized_paths)
+	if Path(common_path).is_file() or common_path.endswith('.nct'):
+		common_path = Path(common_path).parent
+	return normalize_dropbox_path(common_path)
 
 def local_path_to_dropbox_path(local_path: str | Path, local_root: str | Path, dropbox_root: str) -> str:
 	local_path_str = str(local_path).replace('\\', '/').strip()

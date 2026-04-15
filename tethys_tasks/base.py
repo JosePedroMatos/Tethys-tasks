@@ -104,6 +104,7 @@ class BaseTask():
         self.dropbox_client = None
 
         self._variable_upper = self._variable.upper()
+        self._variable_lower = self._variable.lower()
         self._cloud_template = self._cloud_template.format(self=self)
         self._local_path_template = self._local_path_template.format(self=self)
         self._storage_path_template = self._storage_path_template.format(self=self)
