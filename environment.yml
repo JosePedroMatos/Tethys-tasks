@@ -39,10 +39,12 @@ dependencies:
   - fastparquet
   - h5netcdf
   - dropbox
+  - zarr
   - pip
   - pip:
     - boto3
     - BeautifulSoup4
+    - ecmwf-opendata
     - seaborn
     - xlwings
     - openpyxl

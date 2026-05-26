@@ -456,12 +456,12 @@ if __name__=='__main__':
     # task = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
     # task.retrieve_store_upload_and_cleanup()
 
-    date_from = '2026-04-01 00:00:00'
+    date_from = '2026-01-01 00:00:00'
     # task = GPM_IMERG_LATE_BELGIUM(download_from_source=True, date_from=date_from)
     # task = GPM_IMERG_LATE_CAUCASUS(download_from_source=True, date_from=date_from)
-    # task = GPM_IMERG_LATE_IBERIA(download_from_source=True, date_from=date_from)
+    task = GPM_IMERG_LATE_IBERIA(download_from_source=True, date_from=date_from)
     # task = GPM_IMERG_LATE_TAJIKISTAN(download_from_source=True, date_from=date_from)
-    task = GPM_IMERG_LATE_ZAMBEZI(download_from_source=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_ZAMBEZI(download_from_source=True, date_from=date_from)
     task.update()
 
 

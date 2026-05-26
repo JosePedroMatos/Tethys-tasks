@@ -391,11 +391,11 @@ if __name__=='__main__':
     # path = r'T:\tethys-tasks local\ERA5_SD'
     # rename_lowercase(path)
 
-    # task = ERA5_T2M_CAUCASUS(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
-    # task = ERA5_TP_CAUCASUS(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
-    task = ERA5_SD_CAUCASUS(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
+    # task = ERA5_T2M_IBERIA(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
+    task = ERA5_TP_IBERIA(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
+    # task = ERA5_SD_CAUCASUS(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
     
-    task.retrieve_store_upload_and_cleanup()
+    task.update()
     
     # era5 = ERA5_CAUCASUS_SD(download_from_source=True, date_from='1995-01-01', source_parallel_transfers=3)
     # era5 = ERA5_BELGIUM_TP(download_from_source=True, date_from='2021-01-01', source_parallel_transfers=2)
