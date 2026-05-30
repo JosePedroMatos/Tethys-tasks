@@ -494,6 +494,9 @@ class ECMWF_HRES(ECMWF_ENS):
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=12)
         DOWNLOAD_CHUNK_REFS = [0, 150]
 
+        CLOUD_UPLOAD_LOCAL = True
+        SYNC_LATEST_STORED = True
+
         STREAM = 'oper'
         REQUEST_TYPES = ['fc']
 
