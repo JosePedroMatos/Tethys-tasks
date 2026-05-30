@@ -49,9 +49,9 @@ class ECMWF_ENS(BaseTask):
         DOWNLOAD_RETRY_WAIT = 60
         DOWNLOAD_TIMEOUT = 150  # seconds per chunk; exceeded chunks are treated as Failed
 
-        CLOUD_TEMPLATE = 'ECMWF_ENS_TEST/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
-        LOCAL_PATH_TEMPLATE = 'ECMWF_ENS_TEST/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
-        STORAGE_PATH_TEMPLATE = 'ECMWF_ENS_TEST/ecmwf_ens_{self._variable_lower}_{self._zone}/%Y/%m/tethys_ecmwf_ens_{self._variable_lower}_%Y%m%d.nct'
+        CLOUD_TEMPLATE = 'ECMWF_ENS/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
+        LOCAL_PATH_TEMPLATE = 'ECMWF_EN/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
+        STORAGE_PATH_TEMPLATE = 'ECMWF_ENS/ecmwf_ens_{self._variable_lower}_{self._zone}/%Y/%m/tethys_ecmwf_ens_{self._variable_lower}_%Y%m%d.nct'
 
         FAIL_IF_OLDER = pd.Timedelta(hours=24)
         DATE_FROM = (pd.Timestamp.now(datetime.timezone.utc) - pd.Timedelta('2D')).strftime('%Y-%m-%d %H:%M:%S')
@@ -500,9 +500,9 @@ class ECMWF_HRES(ECMWF_ENS):
         STREAM = 'oper'
         REQUEST_TYPES = ['fc']
 
-        CLOUD_TEMPLATE = 'ECMWF_HRES_TEST/{self._variable_upper}/%Y/%m/ecmwf_hres_{self._variable_lower}_%Y%m%dT%H.zip'
-        LOCAL_PATH_TEMPLATE = 'ECMWF_HRES_TEST/{self._variable_upper}/%Y/%m/ecmwf_hres_{self._variable_lower}_%Y%m%dT%H.zip'
-        STORAGE_PATH_TEMPLATE = 'ECMWF_HRES_TEST/ecmwf_hres_{self._variable_lower}_{self._zone}/%Y/%m/tethys_ecmwf_hres_{self._variable_lower}_%Y%m%d.nct'
+        CLOUD_TEMPLATE = 'ECMWF_HRES/{self._variable_upper}/%Y/%m/ecmwf_hres_{self._variable_lower}_%Y%m%dT%H.zip'
+        LOCAL_PATH_TEMPLATE = 'ECMWF_HRES/{self._variable_upper}/%Y/%m/ecmwf_hres_{self._variable_lower}_%Y%m%dT%H.zip'
+        STORAGE_PATH_TEMPLATE = 'ECMWF_HRES/ecmwf_hres_{self._variable_lower}_{self._zone}/%Y/%m/tethys_ecmwf_hres_{self._variable_lower}_%Y%m%d.nct'
 
 class ECMWF_HRES_T2M_WORLD(ECMWF_HRES):
     with CaptureNewVariables() as _ECMWF_HRES_T2M_WORLD_VARIABLES:
