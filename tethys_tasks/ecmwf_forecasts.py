@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import io
 import shutil
 import tempfile
 import datetime
+import contextlib
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
-from itertools import islice
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
@@ -30,12 +31,12 @@ class ECMWF_ENS(BaseTask):
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=24)
         LEADTIMES_LOCAL = [pd.Timedelta(hours=hour) for hour in [*range(0, 145, 3), *range(150, 361, 6)]]   # Set of leadtimes actually present in the downloaded files; may be a superset of the final LEADTIMES used in the output rasters after postprocessing.
         LEADTIMES = [pd.Timedelta(hours=hour) for hour in [*range(0, 145, 3), *range(150, 361, 6)]]         # Actual leadtimes saved in the local files. Modified by _derived_leadtimes if needed based on the variable's characteristics.
-        DOWNLOAD_CHUNK_REFS = [*range(0, 337, 24)]
+        DOWNLOAD_CHUNK_REFS = [*range(0, 361-6, 6)]
 
         CLOUD_UPLOAD_LOCAL = False
         SYNC_LATEST_STORED = False
 
-        SOURCE_PARALLEL_TRANSFERS = 4
+        SOURCE_PARALLEL_TRANSFERS = 6
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=14)
         ASSUME_LOCAL_COMPLETE = True
 
@@ -43,9 +44,10 @@ class ECMWF_ENS(BaseTask):
         VARIABLE = ''
         ZONE = 'world'
         STREAM = 'enfo'
-        REQUEST_TYPES = ['cf', 'pf']
-        DOWNLOAD_RETRIES = 1
+        REQUEST_TYPES = ['pf']
+        DOWNLOAD_RETRIES = 3
         DOWNLOAD_RETRY_WAIT = 60
+        DOWNLOAD_TIMEOUT = 150  # seconds per chunk; exceeded chunks are treated as Failed
 
         CLOUD_TEMPLATE = 'ECMWF_ENS_TEST/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
         LOCAL_PATH_TEMPLATE = 'ECMWF_ENS_TEST/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
@@ -72,12 +74,6 @@ class ECMWF_ENS(BaseTask):
             'sd': 'mm',
         }
 
-        RAW_UNITS = {
-            't2m': 'K',
-            'tp': 'm',
-            'sd': 'm',
-        }
-
     def _set_base_variables(self, cls, kwargs):
         super()._set_base_variables(cls, kwargs)
 
@@ -93,9 +89,15 @@ class ECMWF_ENS(BaseTask):
         return list(leadtimes_local)
 
     def _forecast_hours(self) -> list[int]:
+        '''
+        Returns the forecast leadtimes actually present in the downloaded files
+        '''
         return [int(pd.Timedelta(hour) / pd.Timedelta(hours=1)) for hour in self._leadtimes_local]
 
     def _chunk_leadtime_hours(self, ref_hour: int) -> list[int]:
+        '''
+        Returns the forecast leadtime hours corresponding to the given chunk ref hour.
+        '''
         forecast_hours = self._forecast_hours()
         if ref_hour not in self._download_chunk_refs:
             raise ValueError(f'{ref_hour} is not a configured chunk ref for {self.__class__.__name__}.')
@@ -103,21 +105,6 @@ class ECMWF_ENS(BaseTask):
         ref_index = self._download_chunk_refs.index(ref_hour)
         next_ref = self._download_chunk_refs[ref_index + 1] if ref_index + 1 < len(self._download_chunk_refs) else forecast_hours[-1] + 1
         return [hour for hour in forecast_hours if ref_hour <= hour < next_ref]
-
-    def _chunk_ref_hour(self, leadtime_hour: int) -> int:
-        forecast_hours = self._forecast_hours()
-        if leadtime_hour not in forecast_hours:
-            raise KeyError(f'{leadtime_hour} is not a configured forecast hour for {self.__class__.__name__}.')
-
-        for index, ref_hour in enumerate(self._download_chunk_refs):
-            next_ref = self._download_chunk_refs[index + 1] if index + 1 < len(self._download_chunk_refs) else forecast_hours[-1] + 1
-            if ref_hour <= leadtime_hour < next_ref:
-                return ref_hour
-
-        raise KeyError(f'Could not resolve a chunk ref for forecast hour {leadtime_hour}.')
-
-    def _chunk_member_name(self, production_datetime: pd.Timestamp, ref_hour: int) -> str:
-        return f'ecmwf_ens_{self._variable_lower}_{production_datetime:%Y%m%dT%H}_{ref_hour:03d}.grib2'
 
     def _retrieve_to_target(
         self,
@@ -140,14 +127,15 @@ class ECMWF_ENS(BaseTask):
         if client.use_sas_token:
             result.urls = client._apply_sas_to_urls(result.urls)
 
-        ecmwf_client.download(
-            result.urls,
-            target=result.target,
-            verify=client.verify,
-            session=client.session,
-            maximum_retries=max(int(self._download_retries), 0),
-            retry_after=max(float(self._download_retry_wait), 0.0),
-        )
+        with contextlib.redirect_stderr(io.StringIO()):
+            ecmwf_client.download(
+                result.urls,
+                target=result.target,
+                verify=client.verify,
+                session=client.session,
+                maximum_retries=max(int(self._download_retries), 0),
+                retry_after=max(float(self._download_retry_wait), 0.0),
+            )
 
     @staticmethod
     def _is_unavailable_error(ex: Exception) -> bool:
@@ -161,7 +149,7 @@ class ECMWF_ENS(BaseTask):
         ref_hour: int,
         leadtime_hours: list[int],
     ) -> tuple[str, Path, int, str | None]:
-        chunk_path = tmp_path / self._chunk_member_name(production_datetime, ref_hour)
+        chunk_path = tmp_path / f'{self._variable_lower}_{production_datetime:%Y%m%dT%H}_{ref_hour:03d}.grib2' #self._chunk_member_name(production_datetime, ref_hour)
 
         try:
             client = Client(source='azure', model='ifs', resol='0p25')
@@ -188,68 +176,28 @@ class ECMWF_ENS(BaseTask):
             raise KeyError(f'Local file not present in data index: {local_file}')
         return pd.Timestamp(rows.iloc[0])
 
-    def _download_production_file(
+    def _assemble_production_zip(
         self,
-        production_datetime: pd.Timestamp,
         local_file: Path,
-    ) -> str:
-        local_file.parent.mkdir(parents=True, exist_ok=True)
-
-        with tempfile.TemporaryDirectory(prefix='ecmwf_ens_') as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            chunk_files = {}
-
-            with DownloadMonitor() as monitor:
-                for ref_hour in self._download_chunk_refs:
-                    status, chunk_path, _, detail = self._download_chunk(
-                        production_datetime,
-                        tmp_path,
-                        ref_hour,
-                        self._chunk_leadtime_hours(ref_hour),
-                    )
-                    if status == 'Downloaded':
-                        chunk_files[ref_hour] = chunk_path
-                        self.diag('        ' + monitor.mark_success(chunk_path), 1)
-                        continue
-
-                    if status == 'Unavailable':
-                        self.diag(
-                            f'        Files not yet available for {production_datetime:%Y-%m-%d %H:%M} chunk {ref_hour:03d}: {detail}',
-                            1,
-                        )
-                    else:
-                        self.diag(
-                            f'        Download failed for {production_datetime:%Y-%m-%d %H:%M} chunk {ref_hour:03d}: {detail}',
-                            1,
-                        )
-                    return status
-
-            if len(chunk_files) != len(self._download_chunk_refs):
-                self.diag(
-                    f'        Skipping zip creation for {production_datetime:%Y-%m-%d %H:%M}; only {len(chunk_files)}/{len(self._download_chunk_refs)} chunks completed.',
-                    1,
-                )
-                return 'Failed'
-
-            fd, temp_name = tempfile.mkstemp(
-                prefix=local_file.stem + '.',
-                suffix='.part',
-                dir=local_file.parent,
-            )
-            os.close(fd)
-            temp_zip = Path(temp_name)
-            try:
-                with ZipFile(temp_zip, 'w', compression=ZIP_DEFLATED) as archive:
-                    for _, chunk_file in sorted(chunk_files.items()):
-                        archive.write(chunk_file, arcname=chunk_file.name)
-                if local_file.exists():
-                    local_file.unlink()
-                shutil.move(str(temp_zip), str(local_file))
-            finally:
-                if temp_zip.exists():
-                    temp_zip.unlink()
-
-        return 'Downloaded'
+        chunk_files: dict[int, Path],
+    ) -> None:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=local_file.stem + '.',
+            suffix='.part',
+            dir=local_file.parent,
+        )
+        os.close(fd)
+        temp_zip = Path(temp_name)
+        try:
+            with ZipFile(temp_zip, 'w', compression=ZIP_DEFLATED) as archive:
+                for _, chunk_file in sorted(chunk_files.items()):
+                    archive.write(chunk_file, arcname=chunk_file.name)
+            if local_file.exists():
+                local_file.unlink()
+            shutil.move(str(temp_zip), str(local_file))
+        finally:
+            if temp_zip.exists():
+                temp_zip.unlink()
 
     def _download_from_source(self) -> bool:
         self.diag('    Download from source...', 1)
@@ -267,12 +215,12 @@ class ECMWF_ENS(BaseTask):
             self.diag('        Nothing to download.', 1)
             return False
 
+        workers = max(int(self._source_parallel_transfers), 1)
         self.diag(
-            f'        Using source "azure" with {max(int(self._source_parallel_transfers), 1)} workers and {max(int(self._download_retries), 0)} retries.',
+            f'        Using source "azure" with {workers} workers and {max(int(self._download_retries), 0)} retries.',
             1,
         )
-        downloaded = False
-        workers = max(int(self._source_parallel_transfers), 1)
+
         production_jobs = sorted(
             (
                 (pd.Timestamp(row.production_datetime), Path(row.local_file))
@@ -280,36 +228,128 @@ class ECMWF_ENS(BaseTask):
             ),
             key=lambda item: (item[0], str(item[1])),
         )
-        jobs_iter = iter(production_jobs)
-        executor = ThreadPoolExecutor(max_workers=workers)
-        try:
-            in_flight = deque(
-                (dt, executor.submit(self._download_production_file, dt, lf))
-                for dt, lf in islice(jobs_iter, workers)
+
+        dt_chunk_count = len(self._download_chunk_refs)
+        dt_to_local_file = {dt: lf for dt, lf in production_jobs}
+        dt_chunks_received: dict[pd.Timestamp, int] = {dt: 0 for dt, _ in production_jobs}
+        dt_chunk_files: dict[pd.Timestamp, dict[int, Path]] = {dt: {} for dt, _ in production_jobs}
+        dt_failed: set[pd.Timestamp] = set()
+        stop_from_dt: pd.Timestamp | None = None
+        chunk_attempts: dict[tuple[pd.Timestamp, int], int] = {}  # (dt, ref_hour) -> attempts so far
+
+        # Create a temp dir per production datetime; cleaned up in the finally block.
+        temp_dirs: dict[pd.Timestamp, tempfile.TemporaryDirectory] = {}
+        for dt, local_file in production_jobs:
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            temp_dirs[dt] = tempfile.TemporaryDirectory(prefix='ecmwf_ens_')
+
+        # Flat list of chunk jobs ordered by (production_datetime, ref_hour).
+        all_chunk_jobs = [
+            (dt, ref_hour)
+            for dt, _ in production_jobs
+            for ref_hour in self._download_chunk_refs
+        ]
+        jobs_iter = iter(all_chunk_jobs)
+
+        def submit_chunk(executor: ThreadPoolExecutor, dt: pd.Timestamp, ref_hour: int) -> Future:
+            chunk_attempts[(dt, ref_hour)] = chunk_attempts.get((dt, ref_hour), 0) + 1
+            return executor.submit(
+                self._download_chunk,
+                dt,
+                Path(temp_dirs[dt].name),
+                ref_hour,
+                self._chunk_leadtime_hours(ref_hour),
             )
 
-            while in_flight:
-                production_datetime, future = in_flight.popleft()
-                status = future.result()
+        def next_chunk_job(executor: ThreadPoolExecutor) -> tuple[pd.Timestamp, int, Future] | None:
+            for dt, ref_hour in jobs_iter:
+                if stop_from_dt is not None and dt >= stop_from_dt:
+                    continue  # drain without submitting
+                return dt, ref_hour, submit_chunk(executor, dt, ref_hour)
+            return None
 
-                if status == 'Downloaded':
-                    downloaded = True
-                elif status == 'Unavailable':
-                    self.diag(
-                        f'        Stopping scheduling after {production_datetime:%Y-%m-%d %H:%M}; queued later production datetimes were cancelled and only already-running jobs may still finish.',
-                        1,
-                    )
-                    for _, pending_future in in_flight:
-                        pending_future.cancel()
-                    break
+        downloaded = False
+        executor = ThreadPoolExecutor(max_workers=workers)
+        try:
+            with DownloadMonitor() as monitor:
+                in_flight: deque[tuple[pd.Timestamp, int, Future]] = deque()
+                for _ in range(workers):
+                    job = next_chunk_job(executor)
+                    if job is None:
+                        break
+                    in_flight.append(job)
 
-                try:
-                    dt, lf = next(jobs_iter)
-                    in_flight.append((dt, executor.submit(self._download_production_file, dt, lf)))
-                except StopIteration:
-                    pass
+                while in_flight:
+                    dt, ref_hour, future = in_flight.popleft()
+                    try:
+                        status, chunk_path, _, detail = future.result(timeout=self._download_timeout)
+                    except FutureTimeoutError:
+                        status, chunk_path, detail = 'Failed', None, f'timed out after {self._download_timeout}s'
+
+                    if status == 'Failed' and chunk_attempts.get((dt, ref_hour), 0) <= self._download_retries:
+                        self.diag(
+                            f'        Retrying {dt:%Y-%m-%d %H:%M} chunk {ref_hour:03d} (attempt {chunk_attempts[(dt, ref_hour)]}/{self._download_retries}): {detail}',
+                            1,
+                        )
+                        in_flight.append((dt, ref_hour, submit_chunk(executor, dt, ref_hour)))
+                        job = next_chunk_job(executor)
+                        if job is not None:
+                            in_flight.append(job)
+                        continue
+
+                    dt_chunks_received[dt] += 1
+
+                    if status == 'Downloaded':
+                        dt_chunk_files[dt][ref_hour] = chunk_path
+                        self.diag('        ' + monitor.mark_success(chunk_path), 1)
+                    elif status == 'Unavailable':
+                        dt_failed.add(dt)
+                        self.diag(
+                            f'        Files not yet available for {dt:%Y-%m-%d %H:%M} chunk {ref_hour:03d}: {detail}',
+                            1,
+                        )
+                        if stop_from_dt is None:
+                            stop_from_dt = dt
+                            self.diag(
+                                f'        Stopping scheduling from {dt:%Y-%m-%d %H:%M}; chunks for this and later production datetimes will not be scheduled.',
+                                1,
+                            )
+                            remaining: deque[tuple[pd.Timestamp, int, Future]] = deque()
+                            for idt, iref, ifuture in in_flight:
+                                if idt >= stop_from_dt:
+                                    ifuture.cancel()
+                                    dt_failed.add(idt)
+                                else:
+                                    remaining.append((idt, iref, ifuture))
+                            in_flight = remaining
+                    else:
+                        dt_failed.add(dt)
+                        self.diag(
+                            f'        Download failed for {dt:%Y-%m-%d %H:%M} chunk {ref_hour:03d}: {detail}',
+                            1,
+                        )
+
+                    # When all chunks for a production datetime have been accounted for, assemble or skip.
+                    if dt_chunks_received[dt] == dt_chunk_count:
+                        if dt not in dt_failed:
+                            try:
+                                self._assemble_production_zip(dt_to_local_file[dt], dt_chunk_files[dt])
+                                downloaded = True
+                            except Exception as ex:
+                                self.diag(f'        Failed to assemble zip for {dt:%Y-%m-%d %H:%M}: {ex}', 1)
+                        else:
+                            self.diag(
+                                f'        Skipping zip creation for {dt:%Y-%m-%d %H:%M}; only {len(dt_chunk_files[dt])}/{dt_chunk_count} chunks completed.',
+                                1,
+                            )
+
+                    job = next_chunk_job(executor)
+                    if job is not None:
+                        in_flight.append(job)
         finally:
-            executor.shutdown(wait=True, cancel_futures=True)
+            executor.shutdown(wait=False, cancel_futures=True)
+            for tmp_dir in temp_dirs.values():
+                tmp_dir.cleanup()
 
         if downloaded:
             self._check_existing_data(stored=False, cloud=False)
@@ -362,13 +402,12 @@ class ECMWF_ENS(BaseTask):
             'longitudes': longitudes,
         }
 
-        return MeteoRaster(payload, units=self._raw_units[self._variable], variable=self._variable, verbose=False)
+        return MeteoRaster(payload, variable=self._variable, verbose=False)
 
     def _postprocess_joined_raster(self, raster: MeteoRaster) -> MeteoRaster:
         values = np.asarray(raster.data, dtype=np.float32).copy()
         leadtimes_local = pd.to_timedelta(raster.leadtimes)
         leadtimes = pd.to_timedelta(self._leadtimes)
-        units = self._raw_units[self._variable]
 
         if self._variable == 't2m':
             values -= 273.15
@@ -381,6 +420,8 @@ class ECMWF_ENS(BaseTask):
             values *= 1000.0
             values = np.maximum(values, 0.0)
             units = self._units[self._variable]
+        else:
+            raise Exception(f'Unexpected variable {self._variable} in {self.__class__.__name__}')
 
         local_index = pd.Index(leadtimes_local)
         output_index = pd.Index(leadtimes)
@@ -420,31 +461,8 @@ class ECMWF_ENS(BaseTask):
                     raster = chunk_raster
                 else:
                     raster.join(chunk_raster, strickt=True)
-
+                    # raster.get_values_from_latlon(40, -8).T
             return self._postprocess_joined_raster(raster)
-
-    def read_local_completeness(self, local_file: str) -> pd.Series:
-        empty = pd.MultiIndex.from_arrays([[], []], names=['production_datetime', 'leadtime'])
-        path = Path(local_file)
-        if not path.exists():
-            return pd.Series(dtype=bool, index=empty)
-
-        production_datetime = self._production_datetime_for_local_file(local_file)
-        with ZipFile(path) as archive:
-            members = {Path(name).name for name in archive.namelist() if not name.endswith('/')}
-
-        valid = []
-        for leadtime in self.data_index.loc[self.data_index['local_file'] == local_file, 'leadtime'].drop_duplicates():
-            hour = int(pd.Timedelta(leadtime) / pd.Timedelta(hours=1))
-            ref_hour = self._chunk_ref_hour(hour)
-            if self._chunk_member_name(production_datetime, ref_hour) in members:
-                valid.append((production_datetime, pd.Timedelta(leadtime)))
-
-        if not valid:
-            return pd.Series(dtype=bool, index=empty)
-
-        return pd.Series(True, index=pd.MultiIndex.from_tuples(valid, names=['production_datetime', 'leadtime']))
-
 
 class ECMWF_ENS_T2M_WORLD(ECMWF_ENS):
     with CaptureNewVariables() as _ECMWF_ENS_T2M_WORLD_VARIABLES:
@@ -474,7 +492,7 @@ class ECMWF_HRES(ECMWF_ENS):
 
     with CaptureNewVariables() as _ECMWF_HRES_VARIABLES:
         PRODUCTION_FREQUENCY = pd.Timedelta(hours=12)
-        DOWNLOAD_CHUNK_REFS = [0, 50, 100, 150]
+        DOWNLOAD_CHUNK_REFS = [0, 150]
 
         STREAM = 'oper'
         REQUEST_TYPES = ['fc']
@@ -482,10 +500,6 @@ class ECMWF_HRES(ECMWF_ENS):
         CLOUD_TEMPLATE = 'ECMWF_HRES_TEST/{self._variable_upper}/%Y/%m/ecmwf_hres_{self._variable_lower}_%Y%m%dT%H.zip'
         LOCAL_PATH_TEMPLATE = 'ECMWF_HRES_TEST/{self._variable_upper}/%Y/%m/ecmwf_hres_{self._variable_lower}_%Y%m%dT%H.zip'
         STORAGE_PATH_TEMPLATE = 'ECMWF_HRES_TEST/ecmwf_hres_{self._variable_lower}_{self._zone}/%Y/%m/tethys_ecmwf_hres_{self._variable_lower}_%Y%m%d.nct'
-
-    def _chunk_member_name(self, production_datetime: pd.Timestamp, ref_hour: int) -> str:
-        return f'ecmwf_hres_{self._variable_lower}_{production_datetime:%Y%m%dT%H}_{ref_hour:03d}.grib2'
-
 
 class ECMWF_HRES_T2M_WORLD(ECMWF_HRES):
     with CaptureNewVariables() as _ECMWF_HRES_T2M_WORLD_VARIABLES:
@@ -513,13 +527,13 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    # variables = ['t2m', 'tp', 'sd']
-    variables = ['t2m']
+    variables = ['t2m', 'tp', 'sd']
+    # variables = ['tp']
 
     for v in variables:
 
-        # cls = f'ECMWF_ENS_{v.upper()}_IBERIA'
-        cls = f'ECMWF_HRES_{v.upper()}_IBERIA'
+        cls = f'ECMWF_ENS_{v.upper()}_IBERIA'
+        # cls = f'ECMWF_HRES_{v.upper()}_WORLD'
 
         task_cls = globals().get(cls)
         if task_cls is None:
@@ -531,12 +545,27 @@ if __name__ == '__main__':
         )
 
         try:
-            task.update()
+            task.retrieve()
+            # task.update()
 
             # files = task.data_index['stored_file'].unique()
-            # mr = MeteoRaster.load(files[-1])
+
+            # coords = (29.3, 88.7)
+            # coords = (30, 88.7)
+            # coords = (62, -43.5)
+            # mr = MeteoRaster.load(files[-2])
+            # mr = mr.get_cropped(from_lat=20, to_lat=60, from_lon=40, to_lon=100)
             # mr.plot_mean(coastline=True, borders=True)
-            # mr.get_values_from_latlon(40, -8).T.plot()
+            # mr.get_values_from_latlon(*coords).T.plot()
+
+            # data = mr.get_values_from_latlon(*coords).T.droplevel('ensemble_member')
+            # ax = plt.figure().add_subplot(111)
+            # for i0 in range(data.shape[1]):
+            #     tmp = data.iloc[:, [i0]]
+            #     tmp.index += tmp.columns[0]
+            #     if v=='tp':
+            #         tmp = tmp.cumsum()  
+            #     tmp.plot(ax=ax, label=str(tmp.columns[0]))
 
             pass
         except Exception as ex:

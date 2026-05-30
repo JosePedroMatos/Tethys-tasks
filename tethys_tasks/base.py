@@ -1081,7 +1081,7 @@ class BaseTask():
 
             # Ensure completeness (production and leadtime)
                 # Production dates
-            production_datetimes = index['production_datetime'].unique()
+            production_datetimes = pd.DatetimeIndex(index['production_datetime'].unique())
             valid_production_datetimes = production_datetimes.isin(data.production_datetime)
             if not valid_production_datetimes.all():
                 tmp = np.full([len(production_datetimes) if i==0 else data.data.shape[i] for i in range(5)], np.nan)
