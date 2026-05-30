@@ -50,7 +50,7 @@ class ECMWF_ENS(BaseTask):
         DOWNLOAD_TIMEOUT = 150  # seconds per chunk; exceeded chunks are treated as Failed
 
         CLOUD_TEMPLATE = 'ECMWF_ENS/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
-        LOCAL_PATH_TEMPLATE = 'ECMWF_EN/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
+        LOCAL_PATH_TEMPLATE = 'ECMWF_ENS/{self._variable_upper}/%Y/%m/ecmwf_ens_{self._variable_lower}_%Y%m%dT%H.zip'
         STORAGE_PATH_TEMPLATE = 'ECMWF_ENS/ecmwf_ens_{self._variable_lower}_{self._zone}/%Y/%m/tethys_ecmwf_ens_{self._variable_lower}_%Y%m%d.nct'
 
         FAIL_IF_OLDER = pd.Timedelta(hours=24)
