@@ -319,7 +319,7 @@ class ERA5(BaseTask):
         
         if self._cumulative[self._variable]:
 
-            complete = self.data_index.groupby('local_file').all().loc[:, ['data_exists', 'local_file_exists']]
+            complete = self.data_index.groupby('local_file')[['data_exists', 'local_file_exists']].all()
             complete = complete.apply(lambda x: x.all(), axis=1)
 
             for f0 in complete.index[complete].tolist():
@@ -391,10 +391,13 @@ if __name__=='__main__':
     # path = r'T:\tethys-tasks local\ERA5_SD'
     # rename_lowercase(path)
 
-    # task = ERA5_T2M_IBERIA(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
-    task = ERA5_TP_IBERIA(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
-    # task = ERA5_SD_CAUCASUS(download_from_source=False, date_from='2000-01-01', source_parallel_transfers=3)
-    
+    kwargs = dict(download_from_source = True,
+        date_from = '2000-01-01',
+        source_parallel_transfers = 3)
+    # task = ERA5_T2M_SWITZERLAND(**kwargs)
+    task = ERA5_TP_SWITZERLAND(**kwargs)
+    # task = ERA5_SD_SWITZERLAND(**kwargs)
+
     task.update()
     
     # era5 = ERA5_CAUCASUS_SD(download_from_source=True, date_from='1995-01-01', source_parallel_transfers=3)
