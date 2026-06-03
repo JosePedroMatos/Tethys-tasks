@@ -19,7 +19,7 @@ import base64
 
 class GPM_IMERG_FINAL(BaseTask):
     '''
-    Docstring for GPM IMERG Final Run (30 min) precipitation data
+    GPM IMERG Final Run (30 min) — downloaded from server.
     '''
 
     with CaptureNewVariables() as _GPM_IMERG_FINAL_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
@@ -27,14 +27,20 @@ class GPM_IMERG_FINAL(BaseTask):
         PRODUCTION_FREQUENCY = pd.Timedelta(minutes=30)
         LEADTIMES = pd.timedelta_range('0h', '0h', freq='1h') 
 
-        SOURCE_PARALLEL_TRANSFERS = 3
+        SOURCE_PARALLEL_TRANSFERS = 1
         LOCAL_READ_PROCESSES = 2
-
-        # URL Pattern: https://jsimpsonhttps.pps.eosdis.nasa.gov/imerg/late/{YYYY}/{MM}/3B-HHR-L.MS.MRG.3IMERG.{YYYYMMDD}-S{HHMMSS}-E{HHMMSS}.{m}.V07B.HDF5
         
+        # CLOUD_UPLOAD_LOCAL = True
+
+        SOURCE = os.getenv('IMERG_SOURCE', 'OPeNDAP') # ['OPeNDAP', 'PPS']
+
         FILE_TEMPLATE = '3B-HHR.MS.MRG.3IMERG.%Y%m%d-S%H%M%S-E{{end_str}}.{{dly_mins}}.{{version}}.HDF5.nc4'
 
-        DOWNLOAD_TEMPLATE = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/GPM_L3/GPM_3IMERGHH.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
+        DOWNLOAD_TEMPLATE_OPeNDAP = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/GPM_L3/GPM_3IMERGHH.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
+        DOWNLOAD_TEMPLATE_PPS = 'https://arthurhouhttps.pps.eosdis.nasa.gov/gpmdata/%Y/%m/%d/imerg/' + FILE_TEMPLATE.replace('.HDF5.nc4', '.HDF5')
+
+        DOWNLOAD_TEMPLATE = DOWNLOAD_TEMPLATE_OPeNDAP if SOURCE=='OPeNDAP' else DOWNLOAD_TEMPLATE_PPS
+        
         CLOUD_TEMPLATE = 'IMERG_FINAL/%Y/%j/' + FILE_TEMPLATE
         LOCAL_PATH_TEMPLATE = 'IMERG_FINAL/%Y/%m/%d/' + FILE_TEMPLATE
         STORAGE_PATH_TEMPLATE = 'IMERG_FINAL/imerg_final_{self._zone}/{{floor_year}}/tethys_imerg_final_{{floor_7_days}}.nct'
@@ -44,9 +50,9 @@ class GPM_IMERG_FINAL(BaseTask):
 
         FAIL_IF_OLDER = pd.DateOffset(months=6)
         
-        # Default NASA email to 'user@example.com' if not set
         EARTH_DATA_USER = os.getenv('EARTH_DATA_USER')
         EARTH_DATA_PASSWORD = os.getenv('EARTH_DATA_PASSWORD')
+        PPS_USER = os.getenv('PPS_USER')
 
         PIXEL_SIZE = 0.1
 
@@ -61,7 +67,17 @@ class GPM_IMERG_FINAL(BaseTask):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
                     
-        auth_str = f'{self._earth_data_user}:{self._earth_data_password}'
+        if self._source=='OPeNDAP':
+            self._download_template = self._download_template_opendap
+            auth_str = f'{self._earth_data_user}:{self._earth_data_password}'
+
+        elif self._source=='PPS':
+            self._download_template = self._download_template_pps
+            auth_str = f'{self._pps_user}:{self._pps_user}'
+
+        else:
+            raise Exception(f'    Source {self._source} unknown... ({self.__class__.__name__})')
+
         auth_bytes = auth_str.encode('ascii')
         auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
         self.basic_auth = f'Basic {auth_b64}'
@@ -227,13 +243,25 @@ class GPM_IMERG_FINAL(BaseTask):
         Read a local IMERG file into raw arrays (no MeteoRaster).
         '''
 
-        with xr.open_dataset(local_file, engine='h5netcdf') as ds:
-            longitudes = np.round(ds['lon'].values, 3)
-            latitudes = np.round(ds['lat'].values, 3)
-            data_array = np.expand_dims(ds['precipitation'].values[0,...].transpose(), (0, 1, 2))
-            
-            time_val = ds['time'].values[0]
-            production_datetime = pd.to_datetime([time_val.strftime('%Y-%m-%d %H:%M:%S')])
+        try:
+            with xr.open_dataset(local_file, group='Grid', engine='h5netcdf') as ds:
+                longitudes = np.round(ds['lon'].values, 3)
+                latitudes = np.round(ds['lat'].values, 3)
+                data_array = np.expand_dims(ds['precipitation'].values[0,...].transpose(), (0, 1, 2))
+                
+                time_val = ds['time'].values[0]
+                production_datetime = pd.to_datetime([time_val.strftime('%Y-%m-%d %H:%M:%S')])
+        except Exception as ex:
+            with xr.open_dataset(local_file, engine='h5netcdf', decode_times=False) as ds:
+                longitudes = np.round(ds['lon'].values, 3)
+                latitudes = np.round(ds['lat'].values, 3)
+                data_array = np.expand_dims(ds['precipitation'].values[0, ...].transpose(), (0, 1, 2))
+
+                # time is stored as seconds since Unix epoch (1970-01-01 00:00:00 UTC)
+                time_seconds = float(ds['time'].values[0])
+                production_datetime = pd.to_datetime(
+                    [pd.Timestamp('1970-01-01', tz='UTC') + pd.Timedelta(seconds=time_seconds)]
+                ).tz_localize(None)
         
         data = {
             'latitudes': latitudes,
@@ -428,12 +456,12 @@ class GPM_IMERG_LATE(GPM_IMERG_FINAL):
 
     with CaptureNewVariables() as _GPM_IMERG_LATE_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         PUBLICATION_LATENCY = pd.DateOffset(hours=12)
-
-        # URL Pattern: https://gpm1.gesdisc.eosdis.nasa.gov/opendap/hyrax/GPM_L3/GPM_3IMERGHHL.07/2009/001/3B-HHR-L.MS.MRG.3IMERG.20090101-S050000-E052959.0300.V07B.HDF5.dap.nc4
         
         FILE_TEMPLATE = '3B-HHR-L.MS.MRG.3IMERG.%Y%m%d-S%H%M%S-E{{end_str}}.{{dly_mins}}.{{version}}.HDF5.nc4'
 
-        DOWNLOAD_TEMPLATE = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/hyrax/GPM_L3/GPM_3IMERGHHL.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
+        DOWNLOAD_TEMPLATE_OPeNDAP = 'https://gpm1.gesdisc.eosdis.nasa.gov/opendap/hyrax/GPM_L3/GPM_3IMERGHHL.07/%Y/%j/' + FILE_TEMPLATE[:-3] + 'dap.nc4?dap4.ce=/lat[0:1:1799];/lon[0:1:3599];/time[0:1:0];/lat_bnds[0:1:1799][0:1:1];/precipitation[0:1:0][0:1:3599][0:1:1799];/lon_bnds[0:1:3599][0:1:1]'
+        DOWNLOAD_TEMPLATE_PPS = 'https://jsimpsonhttps.pps.eosdis.nasa.gov/imerg/late/%Y%m/' + FILE_TEMPLATE.replace('.HDF5.nc4','.RT-H5')
+
         CLOUD_TEMPLATE = 'IMERG_LATE/%Y/%j/' + FILE_TEMPLATE
         LOCAL_PATH_TEMPLATE = 'IMERG_LATE/%Y/%m/%d/' + FILE_TEMPLATE
         STORAGE_PATH_TEMPLATE = 'IMERG_LATE/imerg_late_{self._zone}/{{floor_year}}/tethys_imerg_late_{{floor_7_days}}.nct'
@@ -456,13 +484,22 @@ if __name__=='__main__':
     # task = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
     # task.retrieve_store_upload_and_cleanup()
 
-    date_from = '2020-01-01 00:00:00'
-    # task = GPM_IMERG_LATE_BELGIUM(download_from_source=True, date_from=date_from)
+    # date_from = '2020-01-01 00:00:00'
+
+    # date_from = '2025-09-01 00:00:00'
+    date_from = '2026-05-25 00:00:00'
+
+    # task = GPM_IMERG_FINAL_SWITZERLAND(download_from_source=True, date_from=date_from)
+
+
+    task = GPM_IMERG_LATE_BELGIUM(download_from_source=True, date_from=date_from)
     # task = GPM_IMERG_LATE_CAUCASUS(download_from_source=True, date_from=date_from)
-    task = GPM_IMERG_LATE_SWITZERLAND(download_from_source=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_SWITZERLAND(download_from_source=True, date_from=date_from)
     # task = GPM_IMERG_LATE_TAJIKISTAN(download_from_source=True, date_from=date_from)
     # task = GPM_IMERG_LATE_ZAMBEZI(download_from_source=True, date_from=date_from)
     task.update()
 
+
+    # docker-compose run --rm tethys-tasks GPM_IMERG_LATE_TAJIKISTAN update --class_kwargs "{\"date_from\": \"'2026-04-01'\"}"
 
     pass

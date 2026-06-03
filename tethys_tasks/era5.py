@@ -13,6 +13,7 @@ from zipfile import ZipFile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 import string
+import os
 
 class ERA5(BaseTask):
     '''
@@ -30,11 +31,18 @@ class ERA5(BaseTask):
 
         ASSUME_LOCAL_COMPLETE = False
 
-        CLOUD_TEMPLATE = 'test/ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
-        LOCAL_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/era5_{self._variable}_%Y.%m.zip'
+        ERA5_LOCAL_WORLD = os.getenv('ERA5_LOCAL_WORLD', 'False').lower() in ('true', '1', 't')
+
+        if ERA5_LOCAL_WORLD:
+            CLOUD_TEMPLATE = 'test/ERA5_{self._variable_upper}/era5_{self._variable}_World/%Y/era5_{self._variable}_%Y.%m.zip'
+            LOCAL_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_World/%Y/era5_{self._variable}_%Y.%m.zip'
+        else:
+            CLOUD_TEMPLATE = 'test/ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone_local}/%Y/era5_{self._variable}_%Y.%m.zip'
+            LOCAL_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone_local}/%Y/era5_{self._variable}_%Y.%m.zip'
         STORAGE_PATH_TEMPLATE = 'ERA5_{self._variable_upper}/era5_{self._variable}_{self._zone}/%Y/tethys_era5_{self._variable}_%Y.%m.01.nct'
 
         STORAGE_SEARCH_WINDOW = pd.DateOffset(days=40)
+
 
         VARIABLE_DICT = dict(
             t2m = '2m_temperature',
@@ -57,7 +65,6 @@ class ERA5(BaseTask):
         FAIL_IF_OLDER = pd.Timedelta('8D')
 
     def __init__(self, *args, **kwargs):
-
         super().__init__(*args, **kwargs)
 
         # store previous local file (for completeness of cumulative variables)
@@ -127,11 +134,14 @@ class ERA5(BaseTask):
                        'day': days,
                        'variable': [self._variable_dict[self._variable]],
                        'download_format': 'zip',
-                       'area': [self.source_bounding_box[d] for d in ['north', 'west', 'south', 'east']],
                        'time': [f'{h:02d}:00' for h in range(24)],
                        'nocache': ''.join(random.choice(string.digits) for _ in range(6))
                        }
-
+            if self._era5_local_world:
+                area = {}
+            else:
+                area = dict(area=[self.source_bounding_box[d] for d in ['north', 'west', 'south', 'east']])
+            options.update(area)
             variables = ((options, local_path))
             info.append(variables)
 
@@ -392,11 +402,12 @@ if __name__=='__main__':
     # rename_lowercase(path)
 
     kwargs = dict(download_from_source = True,
-        date_from = '2000-01-01',
+        date_from = '2026-05-01',
         source_parallel_transfers = 3)
     # task = ERA5_T2M_SWITZERLAND(**kwargs)
-    task = ERA5_TP_SWITZERLAND(**kwargs)
-    # task = ERA5_SD_SWITZERLAND(**kwargs)
+    # task = ERA5_TP_SWITZERLAND(**kwargs)
+    task = ERA5_SD_SWITZERLAND(**kwargs)
+    # task = ERA5_SD_TAJIKISTAN(**kwargs)
 
     task.update()
     
