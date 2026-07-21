@@ -307,9 +307,9 @@ if __name__=='__main__':
 	import matplotlib.pyplot as plt
 	plt.ion()
 
-	task = CLMS_SWE_NH_V2(download_from_source=True, date_from='2026-01-01')
-	# task = CLMS_SWE_NH_V2_CAUCASUS(download_from_source=True, date_from='2026-03-01')
-	# task = CLMS_SCE_GLOBAL_V1_CAUCASUS(download_from_source=True, date_from='2026-04-05')
+	task = CLMS_SWE_NH_V2(download_from_origin=True, date_from='2026-01-01')
+	# task = CLMS_SWE_NH_V2_CAUCASUS(download_from_origin=True, date_from='2026-03-01')
+	# task = CLMS_SCE_GLOBAL_V1_CAUCASUS(download_from_origin=True, date_from='2026-04-05')
 	task.update()
 
     # files = task.data_index['stored_file'].unique()

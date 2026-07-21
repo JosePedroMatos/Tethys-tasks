@@ -192,6 +192,9 @@ def create_kml_classes(base_class, variable_kwargs:dict={}) -> None:
     :param base_class: The class that serves as the basis for the regional classes. Must be defined in the respective .py file. Example: ERA5.
     :param variable_kwargs: a dict of lists of variables. Must be linked to the base class. Example: {"VARIABLE": ["tp", "t2m"]}
     '''
+
+    print(f'    Creating runtime classes ({base_class.__name__}).')
+
     try:
         resources = importlib_resources.files('tethys_tasks.resources')
         kml_entries = [entry for entry in resources.iterdir() if entry.name.lower().endswith('.kml')]
@@ -203,12 +206,12 @@ def create_kml_classes(base_class, variable_kwargs:dict={}) -> None:
     if target_module is None:
         raise RuntimeError(f'Base class module not loaded: {base_class.__module__}')
 
-    print(f'')
+    # print(f'')
 
     keys = variable_kwargs.keys()
     sizes = list(set([len(variable_kwargs[k]) for k in keys]))
     if len(sizes)>1:
-        raise Exception(f'All variables called in "create_kml_classes" must have a list of paramters of the same length ({base_class.__name__}).')
+        raise Exception(f'All variables called in "create_kml_classes" must have a list of parameters of the same length ({base_class.__name__}).')
 
     for entry in sorted(kml_entries, key=lambda p: p.name):
         zone = Path(entry.name).stem.lower()
@@ -249,6 +252,8 @@ def create_kml_classes(base_class, variable_kwargs:dict={}) -> None:
             }
 
             setattr(target_module, class_name, type(class_name, (base_class,), attrs))
-            if not target_module.__name__.startswith('__main__'):
-                print(f'    Class "{target_module.__name__}.{class_name}" created at runtime.')
+            # if not target_module.__name__.startswith('__main__'):
+            #     print(f'    Class "{target_module.__name__}.{class_name}" created at runtime.')
+    
+    # print(f'        Done.')
             

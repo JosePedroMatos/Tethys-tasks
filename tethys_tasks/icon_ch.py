@@ -445,23 +445,23 @@ if __name__=='__main__':
 
     date_from = '2026-04-07 12:00:00'
 
-    task = ICON_CH2_EPS_TOT_PREC(download_from_source=True, date_from=date_from)
+    task = ICON_CH2_EPS_TOT_PREC(download_from_origin=False, date_from=date_from)
     task.update()
 
-    task = ICON_CH2_EPS_T2M(download_from_source=True, date_from=date_from)
-    task.update()
+    # task = ICON_CH2_EPS_T2M(download_from_origin=True, date_from=date_from)
+    # task.update()
 
-    task = ICON_CH2_EPS_SWE(download_from_source=True, date_from=date_from)
-    task.update()
+    # task = ICON_CH2_EPS_SWE(download_from_origin=True, date_from=date_from)
+    # task.update()
 
     # task._update_index_and_completeness()
 
-    # task = GFS_025_PCP_CAUCASUS(download_from_source=False, date_from='2025-01-01')
+    # task = GFS_025_PCP_CAUCASUS(download_from_origin=False, date_from='2025-01-01')
 
     # task.retrieve_store_upload_and_cleanup()
 
-    files = task.data_index['stored_file'].unique()
-    # files = task.data_index.loc[task.data_index['stored_file_exists'], 'stored_file'].unique()
+    # files = task.data_index['stored_file'].unique()
+    # # files = task.data_index.loc[task.data_index['stored_file_exists'], 'stored_file'].unique()
     # mr = None
     # for mr0 in files:
     #     try:
@@ -474,9 +474,23 @@ if __name__=='__main__':
     # mr.plot_mean(coastline=True, borders=True)
     # mr.get_values_from_latlon_by_event(mr.get_values_from_latlon(46.3,7.6)).bfill(axis=1).iloc[:, 0].plot()
 
-    # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-01-01')    
+    # task = GFS_025_PCP_BELGIUM(download_from_origin=False, date_from='2026-01-01')
     # task.retrieve_and_upload()
     # task.retrieve()
     # task.upload_to_cloud()
+
+    # --- Acquisition status (for reporting) ----------------------------------
+    # Report the date of the last successful acquisition and the success rate
+    # (fraction of leadtimes hit) at that date. This reads self.data_index and
+    # returns a dict:
+    #   {'last_acquisition': Timestamp|None, 'success_rate': float|None,
+    #    'hit_leadtimes': int, 'total_leadtimes': int}
+    # refresh=True first rebuilds the index from stored/local files (network-free,
+    # cloud=False), so it works as a standalone report without a prior retrieve().
+    # task = ICON_CH2_EPS_TOT_PREC(download_from_origin=False, date_from=date_from)
+    print(task.acquisition_status(refresh=True))
+    #
+    # Equivalent via the Docker CLI (main.py prints "Result: {...}"):
+    # docker-compose run --rm tethys-tasks ICON_CH2_EPS_TOT_PREC acquisition_status --class_kwargs "{\"date_from\": \"'2026-04-07 12:00:00'\"}" --fun_kwargs "{\"refresh\": true}"
 
     pass

@@ -1,0 +1,18 @@
+# Optional debug override. Use together with the base compose file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml \
+#       run --service-ports --rm tethys-tasks \
+#       ERA5_T2M_TAJIKISTAN retrieve --class_kwargs "{\"download_from_origin\": false, \"date_from\": \"2026-06-01\"}"
+#
+# The container starts, listens on :5678 and waits; then attach from VS Code
+# with the "Python: Attach (Docker)" launch config. `--service-ports` is required
+# for `run` to publish the debug port. The `.:/app` mount runs your live source
+# so breakpoints map to on-disk files.
+services:
+  tethys-tasks:
+    environment:
+      DEBUGPY: "1"
+    ports:
+      - "5678:5678"
+    volumes:
+      - .:/app

@@ -12,6 +12,10 @@ try:
 except ImportError:
     _era5 = None
 try:
+    from . import era5w as _era5w
+except ImportError:
+    _era5w = None
+try:
     from . import gfs as _gfs
 except ImportError:
     _gfs = None
@@ -23,6 +27,10 @@ try:
     from . import c3s as _c3s
 except ImportError:
     _c3s = None
+try:
+    from . import cerra as _cerra
+except ImportError:
+    _cerra = None
 try:
     from . import gpm as _gpm
 except ImportError:
@@ -47,6 +55,10 @@ try:
     from . import ecmwf_forecasts as _ecmwf
 except ImportError:
     _ecmwf = None
+try:
+    from . import ipma as _ipma
+except ImportError:
+    _ipma = None
 
 __all__ = [
     'CaptureNewVariables',
@@ -69,6 +81,6 @@ def _export_public_classes(module):
         globals()[name] = getattr(module, name)
     __all__.extend(public)
 
-for _module in (_era5, _irm, _gfs, _gpm, _c3s, _icon_ch, _icon_eu, _clms_snow, _meteofrance, _ecmwf):
+for _module in (_era5, _era5w, _irm, _gfs, _gpm, _c3s, _cerra, _icon_ch, _icon_eu, _clms_snow, _meteofrance, _ecmwf, _ipma):
     if _module is not None:
         _export_public_classes(_module)

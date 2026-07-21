@@ -7,6 +7,7 @@ import tempfile
 import os
 import urllib.request
 import urllib.error
+import ssl
 import threading
 import http.cookiejar
 # import time
@@ -54,6 +55,8 @@ class GPM_IMERG_FINAL(BaseTask):
         EARTH_DATA_PASSWORD = os.getenv('EARTH_DATA_PASSWORD')
         PPS_USER = os.getenv('PPS_USER')
 
+        DISABLE_CERT_VERIFY = os.getenv('PPS_DISABLE_CERT_VERIFY', 'false').lower() in ('1', 'true', 'yes')
+
         PIXEL_SIZE = 0.1
 
         ZONE = 'world'
@@ -62,6 +65,7 @@ class GPM_IMERG_FINAL(BaseTask):
 
         VERSION_DICT = {
             '1900-01-01': 'V07B',
+            '2025-10-01': 'V07C',
             }
 
     def __init__(self, *args, **kwargs):
@@ -81,6 +85,9 @@ class GPM_IMERG_FINAL(BaseTask):
         auth_bytes = auth_str.encode('ascii')
         auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
         self.basic_auth = f'Basic {auth_b64}'
+
+        if self._disable_cert_verify:
+            print('        WARNING: PPS_DISABLE_CERT_VERIFY is set — SSL certificate verification is DISABLED for GPM downloads.')
 
     @staticmethod
     def _7_days(production_datetime):
@@ -125,15 +132,20 @@ class GPM_IMERG_FINAL(BaseTask):
 
         return super().populate(additional_columns=additional_columns, *args, **kwargs)
 
-    def __download_helper(self, url: str, destination: str, production_datetime: pd.Timestamp, missing_state: dict, missing_lock: threading.Lock) -> Tuple[str, str]:
+    def __download_helper(self, url: str, destination: str, production_datetime: pd.Timestamp, missing_state: dict, missing_lock: threading.Lock, fatal_event: threading.Event) -> Tuple[str, str]:
         """Download url into a system temp file and move to destination on success."""
-        
+
         dest_path = Path(destination)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
         fd = None
         temp_file = None
         try:
+            if fatal_event.is_set():
+                # A fatal (e.g. server certificate) error already occurred elsewhere:
+                # skip without hitting the network again.
+                return 'Skipping', str(dest_path)
+
             with missing_lock:
                 missing_min = missing_state.get('min_missing')
             if missing_min is not None and production_datetime >= missing_min:
@@ -141,7 +153,13 @@ class GPM_IMERG_FINAL(BaseTask):
 
             # Create a CookieJar to handle the redirects (NASA Earthdata requires cookies)
             cj = http.cookiejar.CookieJar()
-            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+            handlers = [urllib.request.HTTPCookieProcessor(cj)]
+            if self._disable_cert_verify:
+                unverified_context = ssl.create_default_context()
+                unverified_context.check_hostname = False
+                unverified_context.verify_mode = ssl.CERT_NONE
+                handlers.append(urllib.request.HTTPSHandler(context=unverified_context))
+            opener = urllib.request.build_opener(*handlers)
 
             request = urllib.request.Request(
                 url,
@@ -180,6 +198,14 @@ class GPM_IMERG_FINAL(BaseTask):
                     pass
             if temp_file is not None and temp_file.exists():
                 temp_file.unlink()
+
+            if isinstance(ex, urllib.error.URLError) and isinstance(ex.reason, ssl.SSLCertVerificationError):
+                # Server-side certificate problem, not a per-file issue: stop other queued
+                # downloads from hitting the network too, and let it propagate so the DAG
+                # task fails instead of silently marking files as failed.
+                fatal_event.set()
+                raise
+
             print(f'        Error downloading {url} -> {dest_path}: {ex}.')
             return 'Failed', str(dest_path)
 
@@ -207,6 +233,7 @@ class GPM_IMERG_FINAL(BaseTask):
 
         missing_state = {'min_missing': None}
         missing_lock = threading.Lock()
+        fatal_event = threading.Event()
 
         with DownloadMonitor() as monitor:
             with ThreadPoolExecutor(max_workers=self._source_parallel_transfers) as executor:
@@ -218,6 +245,7 @@ class GPM_IMERG_FINAL(BaseTask):
                         r['production_datetime'],
                         missing_state,
                         missing_lock,
+                        fatal_event,
                     ): r['local_file']
                     for _, r in to_download.iterrows()
                 }
@@ -273,14 +301,78 @@ class GPM_IMERG_FINAL(BaseTask):
 
         return data
 
+    # HDF5 signature (also the leading bytes of NetCDF4/.nc4 files, which are HDF5 under the hood)
+    _HDF5_SIGNATURE = b'\x89HDF\r\n\x1a\n'
+
+    @classmethod
+    def _is_corrupt_hdf5(cls, local_file: str) -> bool:
+        '''
+        Confirms whether a local file is actually corrupt (as opposed to a transient read
+        error) so it can be safely deleted. Returns True only for confirmed-bad files.
+
+        A file is considered corrupt when it is empty, does not start with the HDF5
+        signature (e.g. an HTML/error page saved as data), or cannot be opened even though
+        the signature is present (internal truncation). Returns False if the file is missing
+        (nothing to delete).
+        '''
+
+        path = Path(local_file)
+        if not path.exists():
+            return False
+
+        try:
+            if path.stat().st_size == 0:
+                return True
+
+            with open(path, 'rb') as f:
+                header = f.read(len(cls._HDF5_SIGNATURE))
+            if header != cls._HDF5_SIGNATURE:
+                return True
+        except OSError:
+            # Could not even stat/read the first bytes -> treat as corrupt.
+            return True
+
+        # Signature is present: confirm it is truly unreadable (e.g. truncated internals).
+        try:
+            with xr.open_dataset(local_file, engine='h5netcdf'):
+                pass
+            return False
+        except Exception:
+            return True
+
+    def _read_local_safe(self, local_file: str) -> dict:
+        '''
+        Resilient wrapper around _read_local_helper: never lets a bad file block the run.
+        Returns the data dict on success, or None on failure (deleting the file only when
+        corruption is confirmed, so it is re-downloaded naturally on the next update).
+        '''
+
+        try:
+            return self._read_local_helper(local_file)
+        except Exception as ex:
+            self.diag(f'            Failed to read "{local_file}" ({self.__class__.__name__}): {ex}.', 1)
+
+            if self._is_corrupt_hdf5(local_file):
+                try:
+                    Path(local_file).unlink(missing_ok=True)
+                    self.diag(f'            Deleted corrupt file "{local_file}". It will re-download on the next update.', 1)
+                except OSError as del_ex:
+                    self.diag(f'            Could not delete corrupt file "{local_file}": {del_ex}.', 1)
+            else:
+                self.diag(f'            "{local_file}" failed to read but is not confirmed corrupt; skipping without deleting.', 1)
+
+            return None
+
     def read_local(self, local_file: str) -> MeteoRaster:
         '''
         Returns a MeteoRaster object with the data
         '''
         self.diag(f'            Reading "{local_file}" ({self.__class__.__name__})', 1)
-        
-        data = self._read_local_helper(local_file)
-        
+
+        data = self._read_local_safe(local_file)
+        if data is None:
+            raise Exception(f'Could not read local file "{local_file}" ({self.__class__.__name__}).')
+
         mr = MeteoRaster(data, units=self._units, variable=self._variable, verbose=False)
         return mr
 
@@ -327,8 +419,18 @@ class GPM_IMERG_FINAL(BaseTask):
             if not index_existing.empty:
                 self.diag(f'            Reading {len(index_existing)} local files for "{s0}"', 1)
 
-                first_row = index_existing.iloc[0]
-                d_sample = self._read_local_helper(first_row['local_file'])
+                # Find the first readable file for the lat/lon sample; corrupt ones are
+                # deleted inside _read_local_safe and skipped.
+                d_sample = None
+                for sample_file in index_existing['local_file']:
+                    d_sample = self._read_local_safe(sample_file)
+                    if d_sample is not None:
+                        break
+
+                if d_sample is None:
+                    self.diag(f'            No readable local files for "{s0}"; skipping.', 1)
+                    continue
+
                 lats = d_sample['latitudes']
                 lons = d_sample['longitudes']
 
@@ -372,12 +474,16 @@ class GPM_IMERG_FINAL(BaseTask):
                             
                     # else:
                     with ThreadPoolExecutor(max_workers=self._local_read_processes) as executor:
-                        futures = {executor.submit(self._read_local_helper, row.local_file): row for row in read_rows}
+                        futures = {executor.submit(self._read_local_safe, row.local_file): row for row in read_rows}
 
                         for future in as_completed(futures):
                             row = futures[future]
                             self.diag(f'            Read "{row.local_file}" ({self.__class__.__name__})', 1)
                             data_slice = future.result()
+
+                            if data_slice is None:
+                                self.diag(f'            Skipping unreadable file "{row.local_file}".', 1)
+                                continue
 
                             p_idx = prod_map[row.production_datetime]
                             full_data[p_idx, 0, 0, :, :] = data_slice['data']
@@ -470,7 +576,7 @@ class GPM_IMERG_LATE(GPM_IMERG_FINAL):
 
         VERSION_DICT = {
             '1900-01-01': 'V07B',
-            '2026-03-03': 'V07C',
+            # '2026-03-03': 'V07C',
             }
 
 # creates regional classes such as GPM_IMERG_FINAL_CAUCASUS, GPM_IMERG_LATE_CAUCASUS, etc...
@@ -481,25 +587,26 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    # task = GPM_IMERG_FINAL_ZAMBEZI(download_from_source=True, date_from='2025-09-25 00:00')
+    # task = GPM_IMERG_FINAL_ZAMBEZI(download_from_origin=True, date_from='2025-09-25 00:00')
     # task.retrieve_store_upload_and_cleanup()
 
     # date_from = '2020-01-01 00:00:00'
 
     # date_from = '2025-09-01 00:00:00'
-    date_from = '2026-05-25 00:00:00'
+    # date_from = '2026-01-25 00:00:00'
+    date_from = '2025-07-01 00:00:00'
 
-    # task = GPM_IMERG_FINAL_SWITZERLAND(download_from_source=True, date_from=date_from)
+    task = GPM_IMERG_FINAL_IBERIA(download_from_origin=True, date_from=date_from)
 
 
-    task = GPM_IMERG_LATE_BELGIUM(download_from_source=True, date_from=date_from)
-    # task = GPM_IMERG_LATE_CAUCASUS(download_from_source=True, date_from=date_from)
-    # task = GPM_IMERG_LATE_SWITZERLAND(download_from_source=True, date_from=date_from)
-    # task = GPM_IMERG_LATE_TAJIKISTAN(download_from_source=True, date_from=date_from)
-    # task = GPM_IMERG_LATE_ZAMBEZI(download_from_source=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_BELGIUM(download_from_origin=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_CAUCASUS(download_from_origin=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_SWITZERLAND(download_from_origin=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_TAJIKISTAN(download_from_origin=True, date_from=date_from)
+    # task = GPM_IMERG_LATE_ZAMBEZI(download_from_origin=True, date_from=date_from)
     task.update()
 
 
-    # docker-compose run --rm tethys-tasks GPM_IMERG_LATE_TAJIKISTAN update --class_kwargs "{\"date_from\": \"'2026-04-01'\"}"
+    # docker-compose run --rm tethys-tasks GPM_IMERG_LATE_TAJIKISTAN update --class_kwargs "{\"download_from_origin\": \"False\", \"date_from\": \"'2026-06-01'\"}"
 
     pass

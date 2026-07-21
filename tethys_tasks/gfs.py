@@ -30,7 +30,7 @@ class GFS_025(BaseTask):
         SOURCE_PARALLEL_TRANSFERS = 3
         LOCAL_READ_PROCESSES = 2
 
-        CLOUD_TEMPLATE = 'test/NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
+        CLOUD_TEMPLATE = 'NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
         LOCAL_PATH_TEMPLATE = 'NOAA_GFS_0.25/%Y/%m/%H/{{leadtime_hours}}/gfs_4_%Y.%m.%d_%H_{{leadtime_hours}}.nc'
         STORAGE_PATH_TEMPLATE = 'NOAA_GFS_0.25/gfs_{self._variable_lower}_{self._zone}/{{floor_year}}/tethys_NOAA_GFS_0.25_{{floor_7_days}}.nct'
 
@@ -473,9 +473,9 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    # task = GFS_025_TMP_CAUCASUS(download_from_source=False, date_from='2024-01-01')
-    # task = GFS_025_PRATE_CAUCASUS(download_from_source=False, date_from='2026-01-01')
-    task = GFS_025_PRATE_BELGIUM(download_from_source=False, date_from='2026-01-01')
+    # task = GFS_025_TMP_CAUCASUS(download_from_origin=False, date_from='2024-01-01')
+    # task = GFS_025_PRATE_CAUCASUS(download_from_origin=False, date_from='2026-01-01')
+    task = GFS_025_PRATE_BELGIUM(download_from_origin=False, date_from='2026-01-01')
 
     task.update()
 
@@ -490,7 +490,7 @@ if __name__=='__main__':
     # # mr.plot_mean(coastline=True, borders=True)
     # mr.get_values_from_latlon_by_event(mr.get_values_from_latlon(42.5,42.5)).bfill(axis=1).iloc[:, 0].plot()
 
-    # task = GFS_025_PCP_BELGIUM(download_from_source=False, date_from='2026-01-01')    
+    # task = GFS_025_PCP_BELGIUM(download_from_origin=False, date_from='2026-01-01')    
     # task.retrieve_and_upload()
     # task.retrieve()
     # task.upload_to_cloud()

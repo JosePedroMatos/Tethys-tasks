@@ -84,7 +84,7 @@ class BaseTask():
         
         FAIL_IF_OLDER = pd.Timedelta('50d')
 
-    def __init__(self, download_from_source=False, date_from:str='', date_to:str='', verbose=2, *args, **kwargs):
+    def __init__(self, download_from_origin=False, date_from:str='', date_to:str='', verbose=2, *args, **kwargs):
         '''
         Docstring for __init__
         
@@ -92,6 +92,8 @@ class BaseTask():
         For example, CLEANUP_WINDOW, cleanup_window, or Cleanup_Window will all be accessible as self._cleanup_window.
 
         All other kwargs are defined as self. properties without changes.
+
+        !!! bool arguments that may be passed by the docker must be parsed accordingly (see download_from_origin)
         '''
 
         self.verbose = verbose
@@ -109,7 +111,9 @@ class BaseTask():
         self._local_path_template = self._local_path_template.format(self=self)
         self._storage_path_template = self._storage_path_template.format(self=self)
 
-        self.download_from_source = download_from_source
+        self._download_from_origin = download_from_origin
+        if isinstance(self._download_from_origin, str):
+            self._download_from_origin = self._download_from_origin=='True'
 
         self.source_bounding_box = None
         if self._source_kml.endswith('.kml'):
@@ -318,10 +322,12 @@ class BaseTask():
 
         downloaded = self._download_from_cloud()
 
-        if self.download_from_source:
+        if self._download_from_origin:
             downloaded = self._download_from_source()
             if downloaded:
                 self._update_index_and_completeness(stored=False, cloud=False)
+        else:
+            self.diag('    Retrieval from origin skipped due to class kwargs.', 1)
 
         self.complete_local_files()
 
@@ -362,6 +368,51 @@ class BaseTask():
                     raise Exception(f'No recent data exists ({self.__class__.__name__}). Last production: {last_date.strftime("%Y-%m-%d %H:%M:%S")}.')
 
         return success
+
+    def acquisition_status(self, refresh:bool=False) -> dict:
+        '''
+        Reports the date of the last successful data acquisition and the success
+        rate (fraction of leadtimes hit) at that date.
+
+        :param refresh: When False (default) the current state of self.data_index
+            is used as-is, so run retrieve()/update() beforehand for up-to-date
+            results. When True, the index is first refreshed from stored and local
+            files (cloud=False) via _update_index_and_completeness, which is fast
+            and network-free (it relies on the completeness.csv sidecars). Use
+            refresh=True for a standalone report (e.g. an Airflow report DAG) that
+            has not just run a retrieval in the same process.
+
+        :return: dict with keys
+            last_acquisition (pd.Timestamp | None): most recent production_datetime
+                with at least one leadtime hit. None if no data exists.
+            success_rate (float | None): hit_leadtimes / total_leadtimes at that
+                date (0..1). None if no data exists.
+            hit_leadtimes (int): leadtimes with data at that date.
+            total_leadtimes (int): leadtimes indexed for that date.
+        '''
+
+        if refresh:
+            self._update_index_and_completeness(stored=True, local=True, cloud=False)
+
+        result = dict(last_acquisition=None, success_rate=None,
+                      hit_leadtimes=0, total_leadtimes=0)
+
+        hits = self.data_index.loc[self.data_index['data_exists'], 'production_datetime']
+        if hits.empty:
+            return result
+
+        last_acquisition = hits.max()
+        at_last = self.data_index.loc[self.data_index['production_datetime'] == last_acquisition]
+        total = int(len(at_last))
+        hit = int(at_last['data_exists'].sum())
+
+        result.update(
+            last_acquisition=last_acquisition,
+            success_rate=(hit / total) if total else None,
+            hit_leadtimes=hit,
+            total_leadtimes=total,
+        )
+        return result
 
     def _check_existing_files(self, stored:bool=True, local:bool=True, cloud:bool=True) -> None:
         '''

@@ -544,7 +544,7 @@ if __name__ == '__main__':
 
         task = task_cls(
             date_from='2026-04-14 00:00:00',
-            download_from_source=True,
+            download_from_origin=True,
         )
 
         try:

@@ -38,7 +38,7 @@ def _leadtime_signature(leadtimes):
 
 def _build_task(task_cls, date_from):
     return task_cls(
-        download_from_source=True,
+        download_from_origin=True,
         date_from=date_from,
     )
 

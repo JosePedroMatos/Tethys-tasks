@@ -157,7 +157,7 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
             if isinstance(data['production_datetime'], np.datetime64) or data['production_datetime'].ndim==0:
                 data['production_datetime'] = np.array([data['production_datetime'],])
             data['data'] = np.expand_dims(ds[variable][...].data, axis=0)
-            data['leadtimes'] = [pd.DateOffset(months=int(m)) for m in np.round(ds.step.data.astype(float)/1E9/86400/30, 0)]
+            data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(1, 7)])
 
             seconds = np.diff(ds.step.data/1E9, prepend=0).astype(float)
 
@@ -189,38 +189,28 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
         data = self._read_helper(local_file)
                 
         if self._variable == 'tprate':
+            data['data'] *= 1000
             units = 'mm/month'
         elif self._variable == 't2m':
             data['data'] -= 273.15
             units = 'C'
                 
+        data['Production_datetime'] = pd.DatetimeIndex(data['production_datetime'])
+
         tmp = MeteoRaster(data, units=units, variable=self._variable, verbose=False)
         tmp.trim()
         # tmp.getDataFromLatLon(26, -14).to_clipboard(excel=True)
-        
+        # tmp.plot_mean(multiplier=12, vmax=3000)
+        # tmp.get_cropped(from_lon=-170, to_lon=170, from_lat=-85, to_lat=85).plot_mean(multiplier=12, vmax=3000, borders=True)
+        # a = tmp.get_cropped(from_lon=-170, to_lon=170, from_lat=-85, to_lat=85)
+        # a.longitudes +=
+
         return tmp
 
 class C3S_ECMWF51_TPRATE_WORLD(C3S_ECMWF51_T2M_WORLD):
     with CaptureNewVariables() as _C3S_ECMWF51_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
         ZONE='world'
-
-class C3S_UKMO604_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
-    with CaptureNewVariables() as _C3S_UKMO604_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='t2m'
-        ZONE='world'
-
-        C3S_SYSTEM = '604'
-        ORIGINATING_CENTRE = 'ukmo'
-        MISSING_YEARS = [i for i in range(1970, 1993)] + [i for i in range(2017, 2025)] 
-
-        CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
-        LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
-        STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
-
-class C3S_UKMO604_TPRATE_WORLD(C3S_UKMO604_T2M_WORLD):
-    with CaptureNewVariables() as _C3S_UKMO604_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
-        VARIABLE='tprate'
 
 class C3S_UKMO610_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
     with CaptureNewVariables() as _C3S_UKMO610_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
@@ -235,8 +225,75 @@ class C3S_UKMO610_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
 
+    @staticmethod
+    def _read_file(grib_file:str, variable:str='') -> dict:
+
+        data = {}
+        with xr.open_dataset(grib_file, engine='cfgrib', indexpath='') as ds:
+
+            if variable=='':
+                variable_list = list(ds.data_vars)
+                if len(variable_list)>1:
+                    raise Exception('The file should not have more than one data variable.')
+                variable = variable_list[0]
+
+            data['latitudes'] = ds.latitude.data
+            data['longitudes'] = ds.longitude.data
+
+            valid_time = pd.DataFrame(ds.valid_time.data)
+            valid_time.index.name = 'time'
+            valid_time.columns.name = 'step'
+
+            # reference_date = pd.Timestamp(ds.time.data[-1]).normalize()
+            reference_date = pd.Timestamp(f'{"-".join(grib_file.split("_")[-1].replace(".grib", "").split("."))}')
+            event_dates = pd.DatetimeIndex([reference_date + pd.DateOffset(months=int(m)) for m in range(1, 7)])
+            data['production_datetime'] = pd.DatetimeIndex([reference_date])
+            data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(1, 7)])
+
+            size_ = ds[variable].shape[0]
+            days_ = ds[variable].shape[1]
+            stride_ = size_//days_
+            data['data'] = np.empty((1,
+                              size_,
+                              len(event_dates),
+                              ds[variable].shape[-2],
+                              ds[variable].shape[-1],
+                              )) * np.nan
+            for time_idx in range(days_):
+                number_idx = np.arange(size_-(time_idx+1)*stride_, size_-time_idx*stride_)
+                idxs = np.where(valid_time.query('time==@time_idx').iloc[0].dt.normalize().isin(event_dates.normalize()))[0]
+                data['data'][0, time_idx*stride_ + np.arange(stride_), ...] = ds[variable][number_idx, time_idx, idxs, ...].data
+            
+            # pd.DataFrame(np.nanmean(data['data'][0, ...], axis=(-2, -1)))
+            # pd.DataFrame(np.nanmean(ds[variable].data[0, 1, ...], axis=(-2, -1)))
+            # plt.imshow(data['data'][-1, 0, 0, :, :]-273.15)
+
+        if variable in ['tprate']:
+            seconds_in_month = event_dates.days_in_month.astype(float) * 86400
+            for i0, s0 in enumerate(seconds_in_month):
+                data['data'][:, :, i0, ...] *= s0 # m/month
+
+        return data
+
 class C3S_UKMO610_TPRATE_WORLD(C3S_UKMO610_T2M_WORLD):
     with CaptureNewVariables() as _C3S_UKMO610_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_UKMO604_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_UKMO604_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='t2m'
+        ZONE='world'
+
+        C3S_SYSTEM = '604'
+        ORIGINATING_CENTRE = 'ukmo'
+        MISSING_YEARS = [i for i in range(1970, 1993)] + [i for i in range(2017, 2025)] 
+
+        CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
+        LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
+        STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
+
+class C3S_UKMO604_TPRATE_WORLD(C3S_UKMO604_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_UKMO604_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
 
 class C3S_MF9_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
@@ -296,24 +353,84 @@ class C3S_NCEP2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
         ZONE='world'
 
         C3S_SYSTEM = '2'
-        ORIGINATING_CENTRE = 'NCEP'
+        ORIGINATING_CENTRE = 'ncep'
         MISSING_YEARS = [i for i in range(1970, 1993)] + [i for i in range(2017, 2019)] 
 
         CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
 
+    @staticmethod
+    def _read_file(grib_file:str, variable:str='') -> dict:
+
+        data = {}
+        with xr.open_dataset(grib_file, engine='cfgrib', indexpath='') as ds:
+
+            if variable=='':
+                variable_list = list(ds.data_vars)
+                if len(variable_list)>1:
+                    raise Exception('The file should not have more than one data variable.')
+                variable = variable_list[0]
+
+            data['latitudes'] = ds.latitude.data
+            data['longitudes'] = ds.longitude.data
+
+            valid_time = pd.DataFrame(ds.valid_time.data)
+            valid_time.index.name = 'time'
+            valid_time.columns.name = 'step'
+
+            reference_date = pd.Timestamp(f'{"-".join(grib_file.split("_")[-1].replace(".grib", "").split("."))}')
+            event_dates = pd.DatetimeIndex([reference_date + pd.DateOffset(months=int(m)) for m in range(1, 7)])
+            data['production_datetime'] = pd.DatetimeIndex([reference_date])
+            data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(1, 7)])
+
+            size_ = ds[variable].shape[0]-4
+            data['data'] = np.empty((1,
+                              ds[variable].shape[1],
+                              len(event_dates),
+                              ds[variable].shape[-2],
+                              ds[variable].shape[-1],
+                              )) * np.nan
+            for time_idx in range(data['data'].shape[1]):
+                number_idx = size_-time_idx+2*(time_idx%4)
+                idxs = np.where(valid_time.query('time==@time_idx').iloc[0].dt.normalize().isin(event_dates.normalize()))[0]
+                data['data'][0, time_idx, ...] = ds[variable][number_idx, time_idx, idxs, ...].data
+            
+            # plt.imshow(data['data'][-1, 0, :, :]-273.15)
+
+        if variable in ['tprate']:
+            seconds_in_month = event_dates.days_in_month.astype(float) * 86400
+            for i0, s0 in enumerate(seconds_in_month):
+                data['data'][:, :, i0, ...] *= s0 # m/month
+
+        return data
+
 class C3S_NCEP2_TPRATE_WORLD(C3S_NCEP2_T2M_WORLD):
     with CaptureNewVariables() as _C3S_NCEP2_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
 
-class C3S_JMA3_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
-    with CaptureNewVariables() as _C3S_JMA3_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+class C3S_JMA4_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_JMA4_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='t2m'
         ZONE='world'
 
+        C3S_SYSTEM = '4'
+        ORIGINATING_CENTRE = 'jma'
+        MISSING_YEARS = [i for i in range(1970, 1993)]
+
+        CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
+        LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
+        STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
+
+class C3S_JMA4_TPRATE_WORLD(C3S_JMA4_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_JMA4_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
+        VARIABLE='tprate'
+
+class C3S_JMA3_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
+    with CaptureNewVariables() as _C3S_JMA3_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         C3S_SYSTEM = '3'
         ORIGINATING_CENTRE = 'jma'
+
         MISSING_YEARS = [i for i in range(1970, 1993)]
 
         CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
@@ -341,7 +458,9 @@ class C3S_ECCC5_TPRATE_WORLD(C3S_ECCC5_T2M_WORLD):
     with CaptureNewVariables() as _C3S_ECCC5_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
 
-class C3S_BOM2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+        MISSING_YEARS = [i for i in range(1970, 1993)] + [2024]
+
+class C3S_BOM2_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
     with CaptureNewVariables() as _C3S_BOM2_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='t2m'
         ZONE='world'
@@ -354,6 +473,52 @@ class C3S_BOM2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
 
+    # @staticmethod
+    # def _read_file(grib_file:str, variable:str='') -> dict:
+
+    #     data = {}
+    #     with xr.open_dataset(grib_file, engine='cfgrib', indexpath='') as ds:
+
+    #         if variable=='':
+    #             variable_list = list(ds.data_vars)
+    #             if len(variable_list)>1:
+    #                 raise Exception('The file should not have more than one data variable.')
+    #             variable = variable_list[0]
+
+    #         data['latitudes'] = ds.latitude.data
+    #         data['longitudes'] = ds.longitude.data
+
+    #         valid_time = pd.DataFrame(ds.valid_time.data)
+    #         valid_time.index.name = 'time'
+    #         valid_time.columns.name = 'step'
+
+    #         reference_date = pd.Timestamp(ds.time.data[-1]).normalize()
+    #         event_dates = pd.DatetimeIndex([reference_date + pd.DateOffset(months=int(m)) for m in range(1, 7)])
+    #         data['production_datetime'] = pd.DatetimeIndex([reference_date])
+    #         data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(6)])
+            
+    #         size_ = ds[variable].shape[0]
+    #         stride_ = ds[variable].shape[1]
+    #         data['data'] = np.empty((1,
+    #                           stride_,
+    #                           len(event_dates),
+    #                           ds[variable].shape[-2],
+    #                           ds[variable].shape[-1],
+    #                           )) * np.nan
+    #         for time_idx in range(data['data'].shape[1]):
+    #             number_idx = np.arange(size_-(time_idx+1)*stride_, size_-time_idx*stride_)
+    #             idxs = np.where(valid_time.query('time==@time_idx').iloc[0].dt.normalize().isin(event_dates.normalize()))[0]
+    #             data['data'][0, ...] = ds[variable][number_idx, time_idx, idxs, ...].data
+            
+    #         # plt.imshow(data['data'][-1, 0, 0, :, :]-273.15)
+
+    #     if variable in ['tprate']:
+    #         seconds_in_month = event_dates.days_in_month.astype(float) * 86400
+    #         for i0, s0 in enumerate(seconds_in_month):
+    #             data['data'][:, :, i0, ...] *= s0 # m/month
+
+    #     return data
+
 class C3S_BOM2_TPRATE_WORLD(C3S_BOM2_T2M_WORLD):
     with CaptureNewVariables() as _C3S_BOM2_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
@@ -364,8 +529,8 @@ if __name__=='__main__':
 
 
     classes = [
-        # C3S_ECMWF51_T2M_WORLD,
-        # C3S_ECMWF51_TPRATE_WORLD,
+        C3S_ECMWF51_T2M_WORLD,
+        C3S_ECMWF51_TPRATE_WORLD,
         # C3S_UKMO610_T2M_WORLD,
         # C3S_UKMO610_TPRATE_WORLD,
         # C3S_MF9_T2M_WORLD,
@@ -376,21 +541,27 @@ if __name__=='__main__':
         # C3S_CMCC4_TPRATE_WORLD,
         # C3S_NCEP2_T2M_WORLD,
         # C3S_NCEP2_TPRATE_WORLD,
-        # C3S_JMA3_T2M_WORLD,
-        # C3S_JMA3_TPRATE_WORLD,
+        # C3S_JMA4_T2M_WORLD,
+        # C3S_JMA4_TPRATE_WORLD,
         # C3S_ECCC5_T2M_WORLD,
         # C3S_ECCC5_TPRATE_WORLD,
         # C3S_BOM2_T2M_WORLD,
         # C3S_BOM2_TPRATE_WORLD,
+
+        # C3S_JMA3_T2M_WORLD,
+        # C3S_JMA3_TPRATE_WORLD,
+
+        # C3S_UKMO604_T2M_WORLD,
+        # C3S_UKMO604_TPRATE_WORLD,
     ]
     
     for cls in classes:
         try:
             print(f'Processing {cls.__name__}...')
-            c3s = cls(download_from_source=True, date_from='2026-01-01')
+            c3s = cls(download_from_origin=True, date_from='2026-01-01', verbose=True, assume_local_complete=True)
             c3s.update()
         except Exception as ex:
-            pass
+            raise
 
    
     # mr = MeteoRaster.load(c3s.data_index['stored_file'].iloc[-1])

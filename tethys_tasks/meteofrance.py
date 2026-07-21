@@ -455,7 +455,7 @@ if __name__ == '__main__':
     from dotenv import load_dotenv
     load_dotenv()
 
-    kwargs = dict(download_from_source=True, date_from='2026-04-14')
+    kwargs = dict(download_from_origin=True, date_from='2026-04-14')
 
     task = AROME_0025_T2M_BELGIUM(**kwargs)
     # task = AROME_0025_TP_BELGIUM(**kwargs)

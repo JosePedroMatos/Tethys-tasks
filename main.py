@@ -8,6 +8,15 @@ from dotenv import load_dotenv
 # Load environment variables from .env if it exists
 load_dotenv()
 
+# Optional remote debugging inside the container: set DEBUGPY=1 (e.g. via
+# docker-compose.debug.yml) to make the process listen on :5678 and wait for a
+# debugger to attach before running. No-op otherwise.
+if os.getenv('DEBUGPY', '').lower() in ('true', '1', 't'):
+    import debugpy
+    debugpy.listen(('0.0.0.0', 5678))
+    print('debugpy: waiting for debugger attach on :5678 ...', flush=True)
+    debugpy.wait_for_client()
+
 from tethys_tasks.base import BaseTask
 import tethys_tasks
 
@@ -24,7 +33,7 @@ def main():
 
     # Get the class
     try:
-        print(tethys_tasks.__all__)
+        # print(tethys_tasks.__all__)
         print(args.class_name)
         cls = getattr(tethys_tasks, args.class_name, None)
         if cls is None:
