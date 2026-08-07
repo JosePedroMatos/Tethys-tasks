@@ -508,6 +508,31 @@ class BaseTask():
                 mask = self.data_index['cloud_file'].isin(existing_cloud_files)
                 self.data_index.loc[mask, 'cloud_file_exists'] = True
 
+    def _load_stored_file(self, stored_file:str):
+        '''
+        Loads a stored file, returning None when it cannot be read.
+
+        A file truncated by an unclean shutdown is unreadable by HDF5 and used to abort
+        the whole run. Callers treat None as "not stored yet", so the file is rebuilt
+        from the local files (or re-downloaded from Dropbox) instead.
+        '''
+
+        try:
+            return MeteoRaster.load(stored_file, verbose=False)
+        except Exception as ex:
+            print(f'        Stored file unreadable, it will be rebuilt: {stored_file} ({ex}).')
+            return None
+
+    def _discard_unreadable_stored_file(self, stored_file:str, idx, ex:Exception=None) -> None:
+        '''
+        Marks an unreadable stored file as missing so it is regenerated downstream.
+        '''
+
+        if ex is not None:
+            print(f'        Stored file unreadable, treating it as missing: {stored_file} ({ex}).')
+
+        self.data_index.loc[idx, ['stored_file_exists', 'stored_file_complete', 'data_exists']] = False
+
     def _check_existing_data(self, stored:bool=True, local:bool=True, cloud:bool=True, **kwargs) -> None:
         '''
         Checks data one file at a time
@@ -533,13 +558,24 @@ class BaseTask():
                     self.data_index.loc[idx, 'data_exists'] = True
                     continue
 
-                if MeteoRaster.get_completeness(s0):
+                try:
+                    stored_complete = MeteoRaster.get_completeness(s0)
+                except Exception as ex:
+                    self._discard_unreadable_stored_file(s0, idx, ex)
+                    continue
+
+                if stored_complete:
                     self.data_index.loc[idx, 'data_exists'] = True
                     self.data_index.loc[idx, 'stored_file_complete'] = True
                 else:
                     self.data_index.loc[idx, 'stored_file_complete'] = False
-                    complete_index = MeteoRaster.load(s0, verbose=False).get_complete_index().stack()
-                    
+
+                    data = self._load_stored_file(s0)
+                    if data is None:
+                        self._discard_unreadable_stored_file(s0, idx)
+                        continue
+                    complete_index = data.get_complete_index().stack()
+
                     idx = complete_index.index.isin(self.data_index.index)
                     complete_index = complete_index.loc[idx, :]
 
@@ -1097,8 +1133,9 @@ class BaseTask():
             already_stored = None
             if Path(s0).exists():
                 self.diag(f'            Reading "{s0}" ({self.__class__.__name__})', 1)
-                data = MeteoRaster.load(s0, verbose=False)
-                already_stored = data.get_complete_index().stack()
+                data = self._load_stored_file(s0)
+                if data is not None:
+                    already_stored = data.get_complete_index().stack()
 
             index = self.data_index[(self.data_index['stored_file']==s0)]
             index_existing = index.loc[self.data_index['data_exists'] & self.data_index['local_file_exists'], :]

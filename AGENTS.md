@@ -41,6 +41,10 @@ subclasses `BaseTask` (in [tethys_tasks/base.py](tethys_tasks/base.py)):
   python main.py <CLASS> <method> --class_kwargs "{\"date_from\": \"'2025-10-01'\"}" --fun_kwargs "{}"
   ```
 - Or via Docker (see [README.md](README.md) for the full examples).
+- `ICON_CH1_EPS_*` downloads ~207 MB of static model constants (the horizontal and
+  vertical constants GRIBs, too large to keep in the repository) into
+  `<LOCAL_FILE_FOLDER>/ICON_CH_CONSTANTS/` on first use, and reuses them afterwards.
+  That folder is a mounted volume, so a Docker run only pays for it once.
 
 ## Acquisition status (reporting)
 

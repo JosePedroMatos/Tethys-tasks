@@ -57,6 +57,12 @@ docker run --rm
 python main.py ERA5_ZAMBEZI_T2M retrieve --class_kwargs "{\"date_from\": \"'2025-10-01'\"}"
 ```
 
+### ICON-CH1 static constants
+`ICON_CH1_EPS_*` needs the model's horizontal and vertical constants GRIBs (~207 MB
+in total, too large to keep in the repository). They are downloaded from MeteoSwiss
+on first use into `<LOCAL_FILE_FOLDER>/ICON_CH_CONSTANTS/` and reused afterwards.
+Since that folder is a mounted volume, a Docker run only pays for it once.
+
 ## Acquisition status (reporting)
 
 `BaseTask.acquisition_status()` reports the date of the **last successful data

@@ -1,14 +1,22 @@
-from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor
+from tethys_tasks import BaseTask, CaptureNewVariables, DownloadMonitor, running_in_docker
 import pandas as pd
 import os
 from pathlib import Path
 import hashlib
 
-_LOCAL_ECCODES_DEFINITIONS = (
-    Path(__file__).resolve().parent / 'resources' / 'icon_ch' / 'eccodes_definitions'
-)
+_ICON_CH_RESOURCES = Path(__file__).resolve().parent / 'resources' / 'icon_ch'
+
+_LOCAL_ECCODES_DEFINITIONS = _ICON_CH_RESOURCES / 'eccodes_definitions'
 if _LOCAL_ECCODES_DEFINITIONS.exists():
     os.environ.setdefault('ECCODES_DEFINITION_PATH', str(_LOCAL_ECCODES_DEFINITIONS))
+
+# Folder where static model constants that are too large to keep in the repository are cached.
+# It resolves to the mounted local file folder so that a docker run does not re-download them,
+# falling back to the resources folder when no local folder is configured.
+_CONSTANTS_CACHE = Path(
+    (os.getenv('LOCAL_FILE_FOLDER_DOCKER') if running_in_docker() else os.getenv('LOCAL_FILE_FOLDER'))
+    or _ICON_CH_RESOURCES
+) / 'ICON_CH_CONSTANTS'
 
 from meteodatalab import data_source, grib_decoder, ogd_api
 from meteodatalab.operators import time_operators, regrid
@@ -37,6 +45,12 @@ _GRIB_EXTENSIONS = {'.grib', '.grib2', '.grb'}
 CLOUD_TEMPLATE_ = 'ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
 LOCAL_PATH_TEMPLATE_ = 'ICON_CH2_{self._variable}/%Y/%m/%d/icon_ch2_{self._variable_lower}_%Y.%m.%d_%H.zip'
 STORAGE_PATH_TEMPLATE_ = 'ICON_CH2/icon_ch2_{self._variable_lower}/{{floor_year}}/tethys_icon_ch2_{{floor_7_days}}.nct'
+
+# ICON-CH1 is stored one file per run: at ~1.1 km a single 33 leadtime field is already ~415 MB,
+# so the 7 days blocks used for ICON-CH2 would grow to a few GB per file (as in ICON_EU).
+CLOUD_TEMPLATE_CH1_ = 'ICON_CH1_{self._variable}/%Y/%m/%d/icon_ch1_{self._variable_lower}_%Y.%m.%d_%H.zip'
+LOCAL_PATH_TEMPLATE_CH1_ = 'ICON_CH1_{self._variable}/%Y/%m/%d/icon_ch1_{self._variable_lower}_%Y.%m.%d_%H.zip'
+STORAGE_PATH_TEMPLATE_CH1_ = 'ICON_CH1/icon_ch1_{self._variable_lower}/%Y/%m/tethys_icon_ch1_{self._variable_lower}_%Y%m%dT%H.nct'
 
 class ICON_CH2_EPS_TOT_PREC(BaseTask):
     '''
@@ -68,11 +82,11 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
 
         PIXEL_SIZE = 0.25
 
-        PERMANENT_FILES = [Path(__file__).resolve().parent / 'resources' / 'icon_ch' / f for f in ['horizontal_constants_icon-ch2-eps.grib2',
-                                                                                                   'horizontal_constants_icon-ch2-eps.sha256',
-                                                                                                   'vertical_constants_icon-ch2-eps.grib2',
-                                                                                                   'vertical_constants_icon-ch2-eps.sha256',
-                                                                                                   ]]
+        PERMANENT_FILES = [_ICON_CH_RESOURCES / f for f in ['horizontal_constants_icon-ch2-eps.grib2',
+                                                            'horizontal_constants_icon-ch2-eps.sha256',
+                                                            'vertical_constants_icon-ch2-eps.grib2',
+                                                            'vertical_constants_icon-ch2-eps.sha256',
+                                                            ]]
 
         UNITS = dict(T_2M='C',         # original in K
                      TOT_PREC='mm/h', # original in mm (cumulative)
@@ -132,11 +146,36 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
 
         return lts
 
+    def _ensure_permanent_files(self):
+        '''
+        Fetches the static horizontal/vertical constants of the model on first use.
+
+        The ICON-CH1 constants add up to ~207 MB, too large to keep in the repository, so the pair
+        is downloaded into _CONSTANTS_CACHE once and reused afterwards. Writing the .sha256 sidecar
+        is what lets meteodatalab skip the file on subsequent downloads.
+
+        Files that are shipped with the repository (as the ICON-CH2 ones) are left untouched.
+        '''
+
+        collection_id = f'ch.meteoschweiz.{self._collection}'
+        for grib in [f for f in self._permanent_files if f.suffix.lower() in _GRIB_EXTENSIONS]:
+            if grib.exists() and grib.with_suffix('.sha256').exists():
+                continue
+
+            self.diag(f'        Fetching static constants "{grib.name}" ({self.__class__.__name__})', 1)
+            grib.parent.mkdir(parents=True, exist_ok=True)
+            url = ogd_api.get_collection_asset_url(collection_id, grib.name)
+            # Private meteodatalab helper: streams the asset, writes the .sha256 sidecar from the
+            # X-Amz-Meta-Sha256 header and raises if the checksum does not match.
+            ogd_api._download_with_checksum(url, grib.parent)
+
     def __download_helper(self, leadtimes, ref_time, local_file):
         '''
-        
+
         '''
-        
+
+        self._ensure_permanent_files()
+
         req = ogd_api.Request(
             collection=self._collection,
             variable=self._variable,
@@ -293,6 +332,7 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
                 raise RuntimeError(f'No GRIB files found in archive {local_file}.')
 
             # these are kept in the permanent folder.
+            self._ensure_permanent_files()
             horizontal_files = [
                 p for p in self._permanent_files if p.name.startswith('horizontal_constants_') and p.suffix.lower() in _GRIB_EXTENSIONS
             ]
@@ -430,11 +470,82 @@ class ICON_CH2_EPS_T2M(ICON_CH2_EPS_TOT_PREC):
         VARIABLE_LOWER = VARIABLE.lower()
 
 class ICON_CH2_EPS_SWE(ICON_CH2_EPS_TOT_PREC):
-    
+
     with CaptureNewVariables() as _ICON_CH2_EPS_SWE_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
         CLOUD_TEMPLATE = CLOUD_TEMPLATE_
         LOCAL_PATH_TEMPLATE = LOCAL_PATH_TEMPLATE_
         STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_
+
+        VARIABLE = 'W_SNOW'
+        VARIABLE_LOWER = VARIABLE.lower()
+
+class ICON_CH1_EPS_TOT_PREC(ICON_CH2_EPS_TOT_PREC):
+    '''
+    MeteoSwiss ICON-CH1-EPS, the ~1 km short-range sibling of ICON-CH2-EPS.
+
+    It shares the collection layout, the download path and the reading logic of ICON-CH2-EPS, so
+    only the configuration differs: 8 runs a day (every 3 h) instead of 4, a 33 h horizon instead
+    of 120 h, and a ~1.1 km target grid instead of ~5.5 km.
+
+    Only the control member is retrieved (perturbed=False), as for ICON-CH2-EPS.
+
+    The 03 UTC run reaches 45 h, but LEADTIMES is uniform per class, so the 34-45 h steps of that
+    single run are not collected.
+
+    https://opendatadocs.meteoswiss.ch/e-forecast-data/e2-e3-numerical-weather-forecasting-model
+    '''
+
+    # Rounded inwards to delta_xy multiples of the native grid extent, so that no target cell falls
+    # entirely outside the source mesh. Native CLON: -0.817149 .. 17.710684,
+    # native CLAT: 42.027927 .. 50.500584 (1147980 cells).
+    xmin, xmax = -0.81, 17.71     # Longitude bounds
+    ymin, ymax = 42.03, 50.50     # Latitude bounds
+    delta_xy = 0.01               # Cell size (~1.1 km, matching the ~1 km native mesh)
+    nx = int(np.round((xmax - xmin)/delta_xy + 1, 6))
+    ny = int(np.round((ymax - ymin)/delta_xy + 1, 6))
+
+    with CaptureNewVariables() as _ICON_CH1_EPS_TOT_PREC_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        # A full run is published ~2 h after its reference time. 2.5 h clears it with a margin and
+        # still picks up the 03 UTC run from 05:30 (3 h would only reach it at 06:00).
+        PUBLICATION_LATENCY = pd.Timedelta(hours=2, minutes=30)
+        PRODUCTION_FREQUENCY = pd.Timedelta(hours=3)
+        LEADTIMES = pd.timedelta_range('0h', '33h', freq='1h')
+
+        CLOUD_TEMPLATE = CLOUD_TEMPLATE_CH1_
+        LOCAL_PATH_TEMPLATE = LOCAL_PATH_TEMPLATE_CH1_
+        STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_CH1_
+
+        PIXEL_SIZE = 0.01
+
+        # ~207 MB in total, downloaded on first use (see _ensure_permanent_files).
+        PERMANENT_FILES = [_CONSTANTS_CACHE / f for f in ['horizontal_constants_icon-ch1-eps.grib2',
+                                                          'horizontal_constants_icon-ch1-eps.sha256',
+                                                          'vertical_constants_icon-ch1-eps.grib2',
+                                                          'vertical_constants_icon-ch1-eps.sha256',
+                                                          ]]
+
+        DESTINATION = regrid.RegularGrid(CRS.from_string("epsg:4326"), nx, ny, xmin, xmax, ymin, ymax)
+        COLLECTION = 'ogd-forecasting-icon-ch1'
+
+        VARIABLE = 'TOT_PREC'
+        VARIABLE_LOWER = VARIABLE.lower()
+
+class ICON_CH1_EPS_T2M(ICON_CH1_EPS_TOT_PREC):
+
+    with CaptureNewVariables() as _ICON_CH1_EPS_T2M_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        CLOUD_TEMPLATE = CLOUD_TEMPLATE_CH1_
+        LOCAL_PATH_TEMPLATE = LOCAL_PATH_TEMPLATE_CH1_
+        STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_CH1_
+
+        VARIABLE = 'T_2M'
+        VARIABLE_LOWER = VARIABLE.lower()
+
+class ICON_CH1_EPS_SWE(ICON_CH1_EPS_TOT_PREC):
+
+    with CaptureNewVariables() as _ICON_CH1_EPS_SWE_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
+        CLOUD_TEMPLATE = CLOUD_TEMPLATE_CH1_
+        LOCAL_PATH_TEMPLATE = LOCAL_PATH_TEMPLATE_CH1_
+        STORAGE_PATH_TEMPLATE = STORAGE_PATH_TEMPLATE_CH1_
 
         VARIABLE = 'W_SNOW'
         VARIABLE_LOWER = VARIABLE.lower()
@@ -445,14 +556,27 @@ if __name__=='__main__':
 
     date_from = '2026-04-07 12:00:00'
 
-    task = ICON_CH2_EPS_TOT_PREC(download_from_origin=False, date_from=date_from)
-    task.update()
+    # task = ICON_CH2_EPS_TOT_PREC(download_from_origin=False, date_from=date_from)
+    # task.update()
 
     # task = ICON_CH2_EPS_T2M(download_from_origin=True, date_from=date_from)
     # task.update()
 
     # task = ICON_CH2_EPS_SWE(download_from_origin=True, date_from=date_from)
     # task.update()
+
+    # ICON-CH1 is only kept for 24 h by MeteoSwiss, so date_from must be recent.
+    # date_from = (pd.Timestamp.now('UTC').tz_localize(None) - pd.Timedelta('6h')).strftime('%Y-%m-%d %H:%M:%S')
+    date_from = '2026-07-24'
+
+    task = ICON_CH1_EPS_TOT_PREC(download_from_origin=True, date_from=date_from)
+    task.update()
+
+    task = ICON_CH1_EPS_T2M(download_from_origin=True, date_from=date_from)
+    task.update()
+
+    task = ICON_CH1_EPS_SWE(download_from_origin=True, date_from=date_from)
+    task.update()
 
     # task._update_index_and_completeness()
 

@@ -127,7 +127,15 @@ class CompletenessIndex():
     
     def read(self):
         if self.index_file.exists():
-            self.index = pd.read_csv(self.index_file, sep=',', index_col='file_name')
+            try:
+                self.index = pd.read_csv(self.index_file, sep=',', index_col='file_name')
+            except Exception as ex:
+                # A truncated or zero-filled index (e.g. an unclean shutdown mid-write)
+                # must not take the whole retrieval down. Start from an empty index and
+                # let write() replace the file at the end of the run.
+                print(f'Completeness index unreadable, ignoring it: {self.index_file.absolute()} ({ex}).')
+                self.index = pd.Series([], index=pd.Index([], name='file_name'), name='complete')
+                return
 
             if isinstance(self.index, pd.DataFrame):
                 if self.index.shape[1]==1:

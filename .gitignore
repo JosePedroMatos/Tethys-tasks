@@ -179,3 +179,8 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# ICON-CH1 static constants: fetched on first use (34 MB + 172 MB, above GitHub's file-size limit)
+tethys_tasks/resources/icon_ch/*icon-ch1-eps.grib2
+tethys_tasks/resources/icon_ch/*icon-ch1-eps.sha256
+tethys_tasks/resources/icon_ch/ICON_CH_CONSTANTS/
