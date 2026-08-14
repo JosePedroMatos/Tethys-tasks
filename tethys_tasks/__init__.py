@@ -24,6 +24,10 @@ try:
 except ImportError:
     _irm = None
 try:
+    from . import irm_radar as _irm_radar
+except ImportError:
+    _irm_radar = None
+try:
     from . import c3s as _c3s
 except ImportError:
     _c3s = None
@@ -81,6 +85,6 @@ def _export_public_classes(module):
         globals()[name] = getattr(module, name)
     __all__.extend(public)
 
-for _module in (_era5, _era5w, _irm, _gfs, _gpm, _c3s, _cerra, _icon_ch, _icon_eu, _clms_snow, _meteofrance, _ecmwf, _ipma):
+for _module in (_era5, _era5w, _irm, _irm_radar, _gfs, _gpm, _c3s, _cerra, _icon_ch, _icon_eu, _clms_snow, _meteofrance, _ecmwf, _ipma):
     if _module is not None:
         _export_public_classes(_module)

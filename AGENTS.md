@@ -10,6 +10,10 @@ subclasses `BaseTask` (in [tethys_tasks/base.py](tethys_tasks/base.py)):
 
 - `ERA5` / `ERA5W`, `C3S_*`, `GFS_025`, `GPM_IMERG_*`, `ICON_CH*`, `ICON_EU`,
   `CLMS_*`, `ECMWF_ENS`/`ECMWF_HRES`, `IRM`, MeteoFrance, etc.
+- `RADCLIM_TP` / `QPE_TP` / `BESTQPE2_TP` (in
+  [tethys_tasks/irm_radar.py](tethys_tasks/irm_radar.py)) are the exception to "acquires": the IRM
+  radar archives are read **in place** from a local `origin_folder` (no download, no local copy, no
+  cloud/Dropbox tier, no crop), so every write path into the origin is disabled there.
 - Region-specific classes (e.g. `ERA5_ZAMBEZI_T2M`, `GFS_025_PRATE_BELGIUM`) are
   generated at import time from the `.kml` files in `tethys_tasks/resources/` by
   `create_kml_classes` (in [tethys_tasks/functions.py](tethys_tasks/functions.py)).

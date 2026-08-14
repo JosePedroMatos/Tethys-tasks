@@ -39,6 +39,8 @@ dependencies:
   - rasterio
   - fastparquet
   - h5netcdf
+  - h5py       # ODIM_H5 radar files (irm_radar)
+  - pyproj     # projected radar grids -> WGS84 (irm_radar)
   - dropbox
   - paramiko
   - zarr
