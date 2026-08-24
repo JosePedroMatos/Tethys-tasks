@@ -4,13 +4,13 @@ from tethys_tasks import BaseTask
 
 def test_basetask_init_default():
     bt = BaseTask()
-    assert hasattr(bt, '_azure_container')
+    assert hasattr(bt, '_azure_storage_connection_string')
     assert hasattr(bt, '_cleanup_window')
     assert hasattr(bt, '_transfer_folder')
 
 def test_basetask_kwargs_override():
-    bt = BaseTask(azure_container='https://example.com', Cleanup_window=pd.DateOffset(months=1))
-    assert bt._azure_container == 'https://example.com'
+    bt = BaseTask(azure_storage_connection_string='https://example.com', Cleanup_window=pd.DateOffset(months=1))
+    assert bt._azure_storage_connection_string == 'https://example.com'
     assert bt._cleanup_window == pd.DateOffset(months=1)
 
 def test_basetask_custom_kwargs():

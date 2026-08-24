@@ -41,6 +41,9 @@ def _build_task(task_cls):
         download_from_origin=True,
         date_from=DATE_FROM,
         date_to=DATE_TO,
+        # Tests must not touch the shared Dropbox account: update() would sync and
+        # prune real remote files. Connectivity is covered by test_dropbox_connection.
+        sync_latest_stored=False,
     )
 
 
@@ -82,7 +85,7 @@ def test_class_pixel_sizes_frequency_and_leadtimes_match():
 def test_retrieve_store_and_upload_real(task_cls):
     task = _build_task(task_cls)
 
-    task.retrieve_store_and_upload()
+    task.update()
 
     expected_start = pd.date_range("1900-01-01", pd.Timestamp(DATE_FROM), freq=task._production_frequency)[-1]
     assert task.data_index["production_datetime"].min() == expected_start

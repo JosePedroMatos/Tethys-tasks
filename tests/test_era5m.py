@@ -23,6 +23,10 @@ WORLD_CLASSES = tuple(_world_era5m_classes())
 
 
 def _build_task(task_cls, **kwargs):
+    # sync_latest_stored=False: tests must not touch the shared Dropbox account,
+    # since update() would sync and prune real remote files. Connectivity is
+    # covered by test_dropbox_connection.
+    kwargs.setdefault('sync_latest_stored', False)
     return task_cls(download_from_origin=True, verbose=0, **kwargs)
 
 
@@ -88,7 +92,7 @@ def test_retrieve_store_and_upload_real(task_cls):
     date_from = (pd.Timestamp.utcnow().tz_localize(None) - pd.DateOffset(months=3)).strftime("%Y-%m-%d")
 
     task = _build_task(task_cls, date_from=date_from)
-    task.retrieve_store_and_upload()
+    task.update()
 
     assert (
         task.data_index["data_exists"].any()

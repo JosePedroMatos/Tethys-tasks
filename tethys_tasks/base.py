@@ -1,6 +1,7 @@
 
 import pandas as pd
 import os
+import re
 from pathlib import Path
 from tethys_tasks import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor, CompletenessIndex
 from collections.abc import Iterable
@@ -16,6 +17,7 @@ from tethys_tasks.dropbox_sync import (
     get_dropbox_client,
     list_dropbox_files,
     local_path_to_dropbox_path,
+    normalize_dropbox_path,
     upload_file,
 )
 from dropbox.exceptions import AuthError
@@ -23,6 +25,9 @@ from dropbox.exceptions import AuthError
 from azure.storage.blob import BlobServiceClient
 from azure.core.credentials import AzureSasCredential
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# How many of the newest stored files are kept locally and on Dropbox.
+STORED_RETENTION_COUNT = 3
 
 class BaseTask():
     '''
@@ -1005,13 +1010,65 @@ class BaseTask():
 
         return sync
 
+    def _stored_retention_scope(self):
+        '''
+        Dropbox scope this task may prune: the static leading folders of the
+        storage template (product/series -- unique to this task) plus a regex
+        matching only the file names this task itself produces.
+
+        Scoping on the template rather than on the files in self.data_index is
+        what keeps retention independent of the run's date_from window. Returns
+        (None, None) when the template has no static prefix, so pruning is
+        skipped rather than widened to the shared Dropbox root.
+        '''
+
+        parts = self._storage_path_template.replace('\\', '/').split('/')
+
+        static_parts = []
+        for part in parts[:-1]:
+            if '%' in part or '{' in part:
+                break
+            static_parts.append(part)
+
+        if not static_parts:
+            return None, None
+
+        root = normalize_dropbox_path(self._dropbox_root_path + '/' + '/'.join(static_parts))
+
+        # Turn the file-name template into a regex: strftime codes and {tokens}
+        # become wildcards, every other character must match literally. Anything
+        # not produced by this task therefore never becomes a deletion candidate.
+        name = parts[-1]
+        pattern = ''
+        idx = 0
+        while idx < len(name):
+            char = name[idx]
+            if char == '%' and idx + 1 < len(name):
+                pattern += r'\d+'
+                idx += 2
+            elif char == '{':
+                end = name.find('}', idx)
+                if end == -1:
+                    return None, None
+                pattern += r'[^/]+'
+                idx = end + 1
+            else:
+                pattern += re.escape(char)
+                idx += 1
+
+        return root, re.compile('^' + pattern + '$', re.IGNORECASE)
+
     def _sync_latest_stored_upload(self) -> bool:
         '''
         Syncs stored files to dropbox
-        Uploads the latest three stored files.
-        Deletes all the older ones.
+        Uploads the latest STORED_RETENTION_COUNT stored files.
         Overwrites the ones that do not have the same hash
         The storage path is based on the stored file path
+
+        Prunes Dropbox back to the newest STORED_RETENTION_COUNT files of this
+        task, ranked over what is actually on Dropbox. The keep set therefore
+        never shrinks with the run's date_from window, and files belonging to
+        another task are out of scope -- see _stored_retention_scope.
         '''
     
         sync = False
@@ -1036,7 +1093,7 @@ class BaseTask():
             .sort_values('production_datetime')
         )
 
-        latest_stored_files = stored_files.loc[stored_files.stored_file_exists].tail(3)
+        latest_stored_files = stored_files.loc[stored_files.stored_file_exists].tail(STORED_RETENTION_COUNT)
         if latest_stored_files.empty:
             self.diag('        Nothing to upload.', 2)
             return sync
@@ -1044,7 +1101,10 @@ class BaseTask():
         dropbox_root_path = common_dropbox_root(latest_stored_files['dropbox_file'].tolist(), self._dropbox_root_path)
 
         client = self._get_dropbox_connection()
-        remote_files = list_dropbox_files(client, dropbox_root_path)
+        # The retention root always contains the desired files, so this single
+        # listing serves both the hash comparison below and the pruning.
+        retention_root, retention_pattern = self._stored_retention_scope()
+        remote_files = list_dropbox_files(client, retention_root or dropbox_root_path)
 
         desired_remote_paths = {}
         to_upload = []
@@ -1057,11 +1117,27 @@ class BaseTask():
             if not compare_local_to_remote_hash(stored_file, remote_metadata):
                 to_upload.append((stored_file, remote_path))
 
-        stale_remote_paths = [
-            metadata['path_display']
-            for path_lower, metadata in remote_files.items()
-            if path_lower not in desired_remote_paths
-        ]
+        # Retention is decided against the files present on Dropbox, never
+        # against self.data_index: a short date_from leaves only the current
+        # storage file in the index, which would otherwise mark every older
+        # file stale and delete it (weekly products lost all but one file).
+        if retention_root is None:
+            stale_remote_paths = []
+        else:
+            prunable = {
+                path_lower: metadata
+                for path_lower, metadata in remote_files.items()
+                if retention_pattern.match(metadata['name'])
+            }
+            # Every storage template dates folders and file names big-endian and
+            # zero-padded, so ordering paths lexically orders them in time.
+            ranked = sorted(set(prunable) | set(desired_remote_paths))
+            keep = set(ranked[-STORED_RETENTION_COUNT:]) | set(desired_remote_paths)
+            stale_remote_paths = [
+                metadata['path_display']
+                for path_lower, metadata in prunable.items()
+                if path_lower not in keep
+            ]
 
         if to_upload:
             self.diag(f'        Uploading ({self._dropbox_parallel_transfers} threads)...', 2)

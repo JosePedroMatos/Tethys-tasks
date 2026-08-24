@@ -2,14 +2,11 @@ from tethys_tasks import BaseTask, CaptureNewVariables
 import pandas as pd
 import xarray as xr
 from pathlib import Path
-from collections.abc import Iterable
 import cdsapi
 import shutil
-import calendar
 import tempfile
 from meteoraster import MeteoRaster
 import numpy as np
-from zipfile import ZipFile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 import string
@@ -181,6 +178,12 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
             data['production_datetime'] = ds.time.data
             if isinstance(data['production_datetime'], np.datetime64) or data['production_datetime'].ndim==0:
                 data['production_datetime'] = np.array([data['production_datetime'],])
+            # This reader assumes one initialisation per file, i.e. dims (number, step,
+            # lat, lon). A centre that switches to a lagged ensemble gains a time
+            # dimension and needs the C3S_UKMO610_T2M_WORLD reader instead.
+            if np.atleast_1d(ds.valid_time.data).ndim!=1:
+                raise Exception(f'"{Path(grib_file).name}" holds {len(data["production_datetime"])} '
+                                'initialisations; this reader expects one.')
             data['data'] = np.expand_dims(ds[variable][...].data, axis=0)
             data['leadtimes'], seconds = _leadtimes_and_month_seconds(np.atleast_1d(ds.valid_time.data),
                                                                      data['production_datetime'][0])
@@ -205,7 +208,7 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
 
     def read_local(self, local_file: str) -> MeteoRaster:
         '''
-        Returns a MeteoRaster object with the ERA5 Land data
+        Returns a MeteoRaster object with the C3S seasonal forecast data
         '''
         
         self.diag(f'            Reading "{local_file}" ({self.__class__.__name__})', 1)
@@ -278,23 +281,26 @@ class C3S_UKMO610_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
             data['production_datetime'] = pd.DatetimeIndex([reference_date])
             data['leadtimes'], seconds = _leadtimes_and_month_seconds(event_dates, reference_date)
 
-            size_ = ds[variable].shape[0]
-            days_ = ds[variable].shape[1]
-            stride_ = size_//days_
-            data['data'] = np.empty((1,
-                              size_,
-                              len(event_dates),
-                              ds[variable].shape[-2],
-                              ds[variable].shape[-1],
-                              )) * np.nan
-            for time_idx in range(days_):
-                number_idx = np.arange(size_-(time_idx+1)*stride_, size_-time_idx*stride_)
+            # cfgrib merges the daily initialisations of the lagged ensemble into a
+            # (number, time) hypercube in which only the members belonging to an
+            # initialisation are set, the rest being NaN. Which members those are is
+            # probed on a single pixel rather than computed: the member count per day is
+            # not always constant (ukmo604 2025.11 has a day with 1 and a day with 3),
+            # so any fixed-stride arithmetic silently drops members and leaves NaN ones.
+            # Members are concatenated oldest initialisation first.
+            blocks = []
+            for time_idx in range(ds[variable].shape[1]):
                 idxs = np.where(valid_time.query('time==@time_idx').iloc[0].dt.normalize().isin(event_dates.normalize()))[0]
-                data['data'][0, time_idx*stride_ + np.arange(stride_), ...] = ds[variable][number_idx, time_idx, idxs, ...].data
-            
-            # pd.DataFrame(np.nanmean(data['data'][0, ...], axis=(-2, -1)))
-            # pd.DataFrame(np.nanmean(ds[variable].data[0, 1, ...], axis=(-2, -1)))
-            # plt.imshow(data['data'][-1, 0, 0, :, :]-273.15)
+                if len(idxs)!=len(event_dates):
+                    raise Exception(f'Initialisation {time_idx} covers {len(idxs)} of the {len(event_dates)} averaged months.')
+                owned = np.where(np.isfinite(ds[variable][:, time_idx, idxs[0], 0, 0].data))[0]
+                blocks.append(ds[variable][owned, time_idx, idxs, ...].data)
+
+            assigned = sum(b.shape[0] for b in blocks)
+            if assigned!=ds[variable].shape[0]:
+                raise Exception(f'Only {assigned} of the {ds[variable].shape[0]} members were assigned to an initialisation.')
+
+            data['data'] = np.concatenate(blocks)[None, ...]
 
         if variable in ['tprate']:
             # Mean rate (m/s) -> m/month; read_local applies the m -> mm factor.
@@ -374,7 +380,7 @@ class C3S_CMCC4_TPRATE_WORLD(C3S_CMCC4_T2M_WORLD):
     with CaptureNewVariables() as _C3S_CMCC4_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='tprate'
 
-class C3S_NCEP2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
+class C3S_NCEP2_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
     with CaptureNewVariables() as _C3S_NCEP2_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='t2m'
         ZONE='world'
@@ -386,52 +392,6 @@ class C3S_NCEP2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
         CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
-
-    @staticmethod
-    def _read_file(grib_file:str, variable:str='') -> dict:
-
-        data = {}
-        with xr.open_dataset(grib_file, engine='cfgrib', indexpath='') as ds:
-
-            if variable=='':
-                variable_list = list(ds.data_vars)
-                if len(variable_list)>1:
-                    raise Exception('The file should not have more than one data variable.')
-                variable = variable_list[0]
-
-            data['latitudes'] = ds.latitude.data
-            data['longitudes'] = ds.longitude.data
-
-            valid_time = pd.DataFrame(ds.valid_time.data)
-            valid_time.index.name = 'time'
-            valid_time.columns.name = 'step'
-
-            reference_date = pd.Timestamp(f'{"-".join(grib_file.split("_")[-1].replace(".grib", "").split("."))}')
-            # event_dates are the GRIB valid_times (the end of each averaged month); they
-            # select the steps to read. The leadtimes label the averaged month itself.
-            event_dates = pd.DatetimeIndex([reference_date + pd.DateOffset(months=int(m)) for m in range(1, 7)])
-            data['production_datetime'] = pd.DatetimeIndex([reference_date])
-            data['leadtimes'], seconds = _leadtimes_and_month_seconds(event_dates, reference_date)
-
-            size_ = ds[variable].shape[0]-4
-            data['data'] = np.empty((1,
-                              ds[variable].shape[1],
-                              len(event_dates),
-                              ds[variable].shape[-2],
-                              ds[variable].shape[-1],
-                              )) * np.nan
-            for time_idx in range(data['data'].shape[1]):
-                number_idx = size_-time_idx+2*(time_idx%4)
-                idxs = np.where(valid_time.query('time==@time_idx').iloc[0].dt.normalize().isin(event_dates.normalize()))[0]
-                data['data'][0, time_idx, ...] = ds[variable][number_idx, time_idx, idxs, ...].data
-            
-            # plt.imshow(data['data'][-1, 0, :, :]-273.15)
-
-        if variable in ['tprate']:
-            # Mean rate (m/s) -> m/month; read_local applies the m -> mm factor.
-            data['data'] *= seconds[None, None, :, None, None]
-
-        return data
 
 class C3S_NCEP2_TPRATE_WORLD(C3S_NCEP2_T2M_WORLD):
     with CaptureNewVariables() as _C3S_NCEP2_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES

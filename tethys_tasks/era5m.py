@@ -40,9 +40,9 @@ import os
 import inspect
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# MeteoRaster.load() only accepts dtype from v3.0 and the deployed wheel can be older
-# (v2.2 at the time of writing). Asking for float32 halves the ~600 MB a yearly world
-# cube (12x1801x3600) would otherwise be held at.
+# MeteoRaster.load() accepts dtype from v3.0 onwards; the guard keeps older wheels
+# working. A yearly world cube (12x1801x3600) is 311 MB at float32 against 622 MB at
+# float64, so this halves what a stored file is held at.
 _LOAD_FLOAT32 = {"dtype": "float32"} if "dtype" in inspect.signature(MeteoRaster.load).parameters else {}
 
 
@@ -283,6 +283,11 @@ class ERA5M_T2M_WORLD(BaseTask):
             values = ds[variable].compute().values
             if values.ndim not in (2, 3):
                 raise Exception(f'Unexpected field shape {values.shape}.')
+            if values.ndim == 3 and values.shape[0] != 1:
+                # Rejected here on purpose: store() reads local files unguarded, so a
+                # bare reshape ValueError there would abort every subsequent run.
+                raise Exception(f'Field carries a non-unit leading dimension '
+                                f'{tuple(ds[variable].dims)}={values.shape}; expected a single monthly field.')
             data['data'] = values.reshape((1, 1, 1) + values.shape[-2:])
 
         return data
@@ -404,17 +409,26 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     plt.ion()
 
-    kwargs = dict(download_from_origin=True,
-                  date_from='2026-03-01')
+    # cloud_upload_local/sync_latest_stored are True in .env, so without these a
+    # diagnostic run publishes the gribs to Azure and the ~123 MB year files to Dropbox.
+    kwargs = dict(download_from_origin=False,
+                  date_from='2025-01-01',
+                  cloud_upload_local=False,
+                  sync_latest_stored=False)
 
     task = ERA5M_T2M_WORLD(**kwargs)
     # task = ERA5M_TP_WORLD(**kwargs)
     # task = ERA5M_SD_WORLD(**kwargs)
     task.update()
 
-    # mr = MeteoRaster.load(task.data_index['stored_file'].unique()[-1])
-    # mr.plot_mean(coastline=True, borders=True)
-    # mr.get_values_from_latlon(47, 8)
+    # World grid: central_longitude must be explicit. The default None reaches
+    # ccrs.PlateCarree(central_longitude=None) and cartopy's antimeridian wrapping path
+    # then either raises TypeError or degenerates into a per-cell PolyCollection over
+    # 6.5M cells. Cropping off the boundary also keeps the fast GeoQuadMesh path.
+    # mr = MeteoRaster.load(task.data_index['stored_file'].unique()[-1], dtype='float32')
+    # mr.get_cropped(from_lat=-85, to_lat=85, from_lon=-179, to_lon=179).plot_mean(
+    #     coastline=True, borders=True, central_longitude=0)
+    # mr.get_values_from_latlon(47, 8).plot()
 
     # docker-compose run --rm tethys-tasks ERA5M_T2M_WORLD update --class_kwargs "{\"download_from_origin\": \"True\", \"date_from\": \"'2025-06-01'\"}"
 

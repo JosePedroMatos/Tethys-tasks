@@ -475,8 +475,10 @@ if __name__=='__main__':
 
     # task = GFS_025_TMP_CAUCASUS(download_from_origin=False, date_from='2024-01-01')
     # task = GFS_025_PRATE_CAUCASUS(download_from_origin=False, date_from='2026-01-01')
-    task = GFS_025_PRATE_BELGIUM(download_from_origin=False, date_from='2026-01-01')
+    # task = GFS_025_PRATE_BELGIUM(download_from_origin=False, date_from='2026-01-01')
 
+    # task = GFS_025_PRATE_ZAMBEZI(download_from_origin=False, date_from='2021-01-01')
+    task = GFS_025_TMP_ZAMBEZI(download_from_origin=False, date_from='2021-01-01')
     task.update()
 
     # # files = task.data_index['stored_file'].unique()

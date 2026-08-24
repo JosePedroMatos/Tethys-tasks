@@ -45,6 +45,34 @@ def _clear_era5_unpack_root() -> None:
 atexit.register(_clear_era5_unpack_root)
 
 
+def _read_boundary_parquet(path) -> pd.DataFrame:
+    '''
+    Reads a boundary (first cumulative step) parquet.
+
+    Files written by older versions of this module went out through pyarrow with
+    float lat/lon labels: pyarrow stringifies the names but records the original
+    float64 dtype in the "pandas" footer metadata, so fastparquet (the engine now
+    in use) rebuilds float column labels and then raises
+    "'numpy.float64' object has no attribute 'endswith'". Dropping the pandas
+    metadata from a scratch copy of the footer recovers the string labels and the
+    latitude column, i.e. the layout the current writer produces.
+    '''
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        pass
+
+    import fastparquet
+
+    tmp = _era5_unpack_root() / f'legacy_{Path(path).stem}.parquet'
+    shutil.copy(path, tmp)
+    try:
+        fastparquet.update_file_custom_metadata(str(tmp), {'pandas': None})
+        return fastparquet.ParquetFile(str(tmp)).to_pandas()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class ERA5(BaseTask):
     '''
     Docstring for ERA5
@@ -393,7 +421,7 @@ class ERA5(BaseTask):
                 parquet_file = parquet_file_
 
         if parquet_file is not None and Path(parquet_file).exists():
-            last_cum_step = pd.read_parquet(parquet_file)
+            last_cum_step = _read_boundary_parquet(parquet_file)
             # Labels are stored as strings with latitude as a data column (parquet
             # forbids float labels and fastparquet drops a string index); restore the
             # float lat/lon grid so the reindex below aligns to the grib.
@@ -566,7 +594,7 @@ class ERA5(BaseTask):
             self.diag('        Verifying completeness for ERA5 cumulative variables...', 2)
 
             local_files = self.data_index.loc[self.data_index['local_file_complete'], 'local_file']
-            for f0 in local_files:
+            for f0 in local_files.unique():
                     with ZipFile(f0, mode='r') as zip_file:
                         names = zip_file.namelist()
                     # A cumulative file is complete only if it carries the boundary
@@ -612,20 +640,32 @@ if __name__=='__main__':
     # path = r'T:\tethys-tasks local\ERA5_SD'
     # rename_lowercase(path)
 
-    kwargs = dict(download_from_origin=False,
-        date_from='2000-01-01',
-        date_to='2025-12-31 23:59:59',
+    kwargs = dict(download_from_origin=True,
+        date_from='1960-01-01',
+        date_to='1981-02-01',
+        cloud_upload_local=False,
+        sync_latest_stored=False,
         source_parallel_transfers = 2)
-    # task = ERA5_T2M_SWITZERLAND(**kwargs)
-    # task = ERA5_SD_SWITZERLAND(**kwargs)
-    # task = ERA5_T2M_BELGIUM(**kwargs)
-    # task = ERA5_SD_TAJIKISTAN(**kwargs)
-    # task = ERA5_TP_TAJIKISTAN(**kwargs)
 
-    task = ERA5_TP_SWITZERLAND(**kwargs)
-    # task.retrieve()
-    task.update()
+    era5 = ERA5_TP_GABON(**kwargs)
+    era5.update()
+
+    era5 = ERA5_T2M_GABON(**kwargs)
+    era5.update()
     
+    # kwargs = dict(download_from_origin=False,
+    #     date_from='1980-01-01',
+    #     date_to='1981-02-01',
+    #     cloud_upload_local=False,
+    #     sync_latest_stored=False,
+    #     source_parallel_transfers = 2)
+
+    # era5 = ERA5_TP_ZAMBEZI(**kwargs)
+    # era5.update()
+
+    # era5 = ERA5_T2M_ZAMBEZI(**kwargs)
+    # era5.update()
+
     # era5 = ERA5_CAUCASUS_SD(download_from_origin=True, date_from='1995-01-01', source_parallel_transfers=3)
     # era5 = ERA5_BELGIUM_TP(download_from_origin=True, date_from='2021-01-01', source_parallel_transfers=2)
     # era5.retrieve_store_and_upload()
@@ -636,7 +676,7 @@ if __name__=='__main__':
     # mr = MeteoRaster.load(r'C:\tethys-tasks storage test\ERA5_T2M\era5_t2m_belgium\2026\tethys_era5_t2m_2026.01.01.nct')
     # mr.plot_mean(coastline=True, borders=True)
 
-    # files = era5.data_index['stored_file'].unique()
+    # files = task.data_index['stored_file'].unique()
     # mr = MeteoRaster.load(files[-2])
     # mr.plot_mean(coastline=True, borders=True)
     # mr.get_values_from_latlon(42.5, 42.5).plot()
