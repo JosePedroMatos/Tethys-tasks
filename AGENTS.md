@@ -8,7 +8,7 @@ Guidance for AI agents (and humans) working in this repository.
 (reanalysis and forecasts) from several sources. Every product is a class that
 subclasses `BaseTask` (in [tethys_tasks/base.py](tethys_tasks/base.py)):
 
-- `ERA5` / `ERA5W`, `C3S_*`, `GFS_025`, `GPM_IMERG_*`, `ICON_CH*`, `ICON_EU`,
+- `ERA5` / `ERA5W` / `ERA5M`, `C3S_*`, `GFS_025`, `GPM_IMERG_*`, `ICON_CH*`, `ICON_EU`,
   `CLMS_*`, `ECMWF_ENS`/`ECMWF_HRES`, `IRM`, MeteoFrance, etc.
 - `RADCLIM_TP` / `QPE_TP` / `BESTQPE2_TP` (in
   [tethys_tasks/irm_radar.py](tethys_tasks/irm_radar.py)) are the exception to "acquires": the IRM
@@ -98,3 +98,8 @@ report = {
   is overridden in the subclass (`_download_from_source`, `read_local`,
   `complete_local_files`, `populate`, `store`, ...).
 - Keep report/status helpers read-only and network-free by default.
+- An accumulation or averaging period is labelled by its **start**: the data at
+  `production_datetime + leadtime` covers the period *beginning* there. ERA5 hourly `tp`
+  shifts its timestamps back one step for this, ERA5M puts a monthly total on the 1st, and
+  C3S monthly means use 0-based leadtimes (CDS `leadtime_month=1` is the initialisation
+  month itself, and its GRIB `valid_time` is the *end* of the averaged month).

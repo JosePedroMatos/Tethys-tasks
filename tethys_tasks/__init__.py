@@ -16,6 +16,10 @@ try:
 except ImportError:
     _era5w = None
 try:
+    from . import era5m as _era5m
+except ImportError:
+    _era5m = None
+try:
     from . import gfs as _gfs
 except ImportError:
     _gfs = None
@@ -85,6 +89,6 @@ def _export_public_classes(module):
         globals()[name] = getattr(module, name)
     __all__.extend(public)
 
-for _module in (_era5, _era5w, _irm, _irm_radar, _gfs, _gpm, _c3s, _cerra, _icon_ch, _icon_eu, _clms_snow, _meteofrance, _ecmwf, _ipma):
+for _module in (_era5, _era5w, _era5m, _irm, _irm_radar, _gfs, _gpm, _c3s, _cerra, _icon_ch, _icon_eu, _clms_snow, _meteofrance, _ecmwf, _ipma):
     if _module is not None:
         _export_public_classes(_module)

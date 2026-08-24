@@ -1168,11 +1168,14 @@ class BaseTask():
                 continue
 
             # Ensure completeness (production and leadtime)
+            # np.full defaults to float64, which would promote a float32 raster (and
+            # every later rewrite of the file, since join keeps the wider dtype).
+            pad_dtype = np.result_type(data.data.dtype, np.float32)
                 # Production dates
             production_datetimes = pd.DatetimeIndex(index['production_datetime'].unique())
             valid_production_datetimes = production_datetimes.isin(data.production_datetime)
             if not valid_production_datetimes.all():
-                tmp = np.full([len(production_datetimes) if i==0 else data.data.shape[i] for i in range(5)], np.nan)
+                tmp = np.full([len(production_datetimes) if i==0 else data.data.shape[i] for i in range(5)], np.nan, dtype=pad_dtype)
                 tmp[valid_production_datetimes, ...] = data.data
                 data.data = tmp 
                 data.production_datetime = production_datetimes
@@ -1185,7 +1188,7 @@ class BaseTask():
                 leadtimes = pd.to_timedelta(leadtimes)
                 valid_leadtimes = leadtimes.isin(data.leadtimes)
             if not valid_leadtimes.all():
-                tmp = np.full([len(valid_leadtimes) if i==2 else data.data.shape[i] for i in range(5)], np.nan)
+                tmp = np.full([len(valid_leadtimes) if i==2 else data.data.shape[i] for i in range(5)], np.nan, dtype=pad_dtype)
                 tmp[:, :, valid_leadtimes, ...] = data.data
                 data.data = tmp 
                 data.leadtimes = leadtimes

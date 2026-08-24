@@ -14,10 +14,35 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 import string
 
+def _leadtimes_and_month_seconds(valid_time, reference_date):
+    '''
+    C3S monthly means average the calendar month ENDING at valid_time: a January run's
+    first field carries valid_time = 1 Feb and holds the January mean (CDS
+    leadtime_month=1 is the initialisation month itself).
+
+    Returns the 0-based DateOffset leadtimes of the averaged months and their length
+    in seconds -- the factor that turns a mean rate (m/s) into m/month.
+    '''
+
+    averaged = pd.DatetimeIndex(valid_time) - pd.DateOffset(months=1)
+    reference_date = pd.Timestamp(reference_date)
+    leadtimes = pd.Index([pd.DateOffset(months=(d.year - reference_date.year) * 12
+                                               + d.month - reference_date.month)
+                          for d in averaged])
+
+    return leadtimes, averaged.days_in_month.to_numpy(dtype=float) * 86400
+
 class C3S_ECMWF51_T2M_WORLD(BaseTask):
     '''
     Docstring for C3S_ECMWF
     https://cds.climate.copernicus.eu/datasets/seasonal-monthly-single-levels?tab=overview
+
+    Two properties of these files drive the readers below:
+    * tprate is a mean rate in m/s ("Mean total precipitation rate"), not an accumulation.
+    * valid_time is the END of the averaged calendar month, so a January run's first
+      field (CDS leadtime_month=1) is the January mean and carries valid_time = 1 Feb.
+      Leadtimes are therefore 0-based: leadtime 0 is the month starting at
+      production_datetime, matching how ERA5/ERA5M label an accumulation period.
     '''
 
     with CaptureNewVariables() as _C3S_ECMWF51_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSnAME_VARIABLES
@@ -25,8 +50,8 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
         PRODUCTION_FREQUENCY = pd.DateOffset(months=1)
         FAIL_IF_OLDER = pd.Timedelta(days=45)
                 
-        LEADTIME_MONTH = ['1', '2', '3', '4', '5', '6']
-        LEADTIMES = [pd.DateOffset(months=int(m)) for m in LEADTIME_MONTH]
+        LEADTIME_MONTH = ['1', '2', '3', '4', '5', '6']   # CDS request: 1 is the initialisation month
+        LEADTIMES = [pd.DateOffset(months=int(m)-1) for m in LEADTIME_MONTH]
 
         SOURCE_PARALLEL_TRANSFERS = 1
 
@@ -51,7 +76,7 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
         )
 
         CUMULATIVE = dict(
-            tp=True,
+            tprate=True,
             t2m=False,
         )
 
@@ -157,13 +182,12 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
             if isinstance(data['production_datetime'], np.datetime64) or data['production_datetime'].ndim==0:
                 data['production_datetime'] = np.array([data['production_datetime'],])
             data['data'] = np.expand_dims(ds[variable][...].data, axis=0)
-            data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(1, 7)])
-
-            seconds = np.diff(ds.step.data/1E9, prepend=0).astype(float)
+            data['leadtimes'], seconds = _leadtimes_and_month_seconds(np.atleast_1d(ds.valid_time.data),
+                                                                     data['production_datetime'][0])
 
         if variable=='tprate':
-            for i0, s0 in enumerate(seconds):
-                data['data'][:, :, i0, ...] *= seconds[i0] * 1000 # mm/month
+            # Mean rate (m/s) -> m/month; read_local applies the m -> mm factor.
+            data['data'] *= seconds[None, None, :, None, None]
 
         return data
 
@@ -194,6 +218,8 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
         elif self._variable == 't2m':
             data['data'] -= 273.15
             units = 'C'
+        else:
+            units = 'unknown'
                 
         data['Production_datetime'] = pd.DatetimeIndex(data['production_datetime'])
 
@@ -246,9 +272,11 @@ class C3S_UKMO610_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
 
             # reference_date = pd.Timestamp(ds.time.data[-1]).normalize()
             reference_date = pd.Timestamp(f'{"-".join(grib_file.split("_")[-1].replace(".grib", "").split("."))}')
+            # event_dates are the GRIB valid_times (the end of each averaged month); they
+            # select the steps to read. The leadtimes label the averaged month itself.
             event_dates = pd.DatetimeIndex([reference_date + pd.DateOffset(months=int(m)) for m in range(1, 7)])
             data['production_datetime'] = pd.DatetimeIndex([reference_date])
-            data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(1, 7)])
+            data['leadtimes'], seconds = _leadtimes_and_month_seconds(event_dates, reference_date)
 
             size_ = ds[variable].shape[0]
             days_ = ds[variable].shape[1]
@@ -269,9 +297,8 @@ class C3S_UKMO610_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
             # plt.imshow(data['data'][-1, 0, 0, :, :]-273.15)
 
         if variable in ['tprate']:
-            seconds_in_month = event_dates.days_in_month.astype(float) * 86400
-            for i0, s0 in enumerate(seconds_in_month):
-                data['data'][:, :, i0, ...] *= s0 # m/month
+            # Mean rate (m/s) -> m/month; read_local applies the m -> mm factor.
+            data['data'] *= seconds[None, None, :, None, None]
 
         return data
 
@@ -380,9 +407,11 @@ class C3S_NCEP2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
             valid_time.columns.name = 'step'
 
             reference_date = pd.Timestamp(f'{"-".join(grib_file.split("_")[-1].replace(".grib", "").split("."))}')
+            # event_dates are the GRIB valid_times (the end of each averaged month); they
+            # select the steps to read. The leadtimes label the averaged month itself.
             event_dates = pd.DatetimeIndex([reference_date + pd.DateOffset(months=int(m)) for m in range(1, 7)])
             data['production_datetime'] = pd.DatetimeIndex([reference_date])
-            data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(1, 7)])
+            data['leadtimes'], seconds = _leadtimes_and_month_seconds(event_dates, reference_date)
 
             size_ = ds[variable].shape[0]-4
             data['data'] = np.empty((1,
@@ -399,9 +428,8 @@ class C3S_NCEP2_T2M_WORLD(C3S_ECMWF51_T2M_WORLD):
             # plt.imshow(data['data'][-1, 0, :, :]-273.15)
 
         if variable in ['tprate']:
-            seconds_in_month = event_dates.days_in_month.astype(float) * 86400
-            for i0, s0 in enumerate(seconds_in_month):
-                data['data'][:, :, i0, ...] *= s0 # m/month
+            # Mean rate (m/s) -> m/month; read_local applies the m -> mm factor.
+            data['data'] *= seconds[None, None, :, None, None]
 
         return data
 
@@ -472,52 +500,6 @@ class C3S_BOM2_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
         CLOUD_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.grib'
         STORAGE_PATH_TEMPLATE = f'C3S/C3S_{ORIGINATING_CENTRE.upper()}{C3S_SYSTEM}_{{self._variable_upper}}/c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_{{self._zone}}/%Y/tethys_c3s_{ORIGINATING_CENTRE.lower()}{C3S_SYSTEM}_{{self._variable}}_%Y.%m.nct'
-
-    # @staticmethod
-    # def _read_file(grib_file:str, variable:str='') -> dict:
-
-    #     data = {}
-    #     with xr.open_dataset(grib_file, engine='cfgrib', indexpath='') as ds:
-
-    #         if variable=='':
-    #             variable_list = list(ds.data_vars)
-    #             if len(variable_list)>1:
-    #                 raise Exception('The file should not have more than one data variable.')
-    #             variable = variable_list[0]
-
-    #         data['latitudes'] = ds.latitude.data
-    #         data['longitudes'] = ds.longitude.data
-
-    #         valid_time = pd.DataFrame(ds.valid_time.data)
-    #         valid_time.index.name = 'time'
-    #         valid_time.columns.name = 'step'
-
-    #         reference_date = pd.Timestamp(ds.time.data[-1]).normalize()
-    #         event_dates = pd.DatetimeIndex([reference_date + pd.DateOffset(months=int(m)) for m in range(1, 7)])
-    #         data['production_datetime'] = pd.DatetimeIndex([reference_date])
-    #         data['leadtimes'] = pd.Index([pd.DateOffset(months=int(m)) for m in range(6)])
-            
-    #         size_ = ds[variable].shape[0]
-    #         stride_ = ds[variable].shape[1]
-    #         data['data'] = np.empty((1,
-    #                           stride_,
-    #                           len(event_dates),
-    #                           ds[variable].shape[-2],
-    #                           ds[variable].shape[-1],
-    #                           )) * np.nan
-    #         for time_idx in range(data['data'].shape[1]):
-    #             number_idx = np.arange(size_-(time_idx+1)*stride_, size_-time_idx*stride_)
-    #             idxs = np.where(valid_time.query('time==@time_idx').iloc[0].dt.normalize().isin(event_dates.normalize()))[0]
-    #             data['data'][0, ...] = ds[variable][number_idx, time_idx, idxs, ...].data
-            
-    #         # plt.imshow(data['data'][-1, 0, 0, :, :]-273.15)
-
-    #     if variable in ['tprate']:
-    #         seconds_in_month = event_dates.days_in_month.astype(float) * 86400
-    #         for i0, s0 in enumerate(seconds_in_month):
-    #             data['data'][:, :, i0, ...] *= s0 # m/month
-
-    #     return data
 
 class C3S_BOM2_TPRATE_WORLD(C3S_BOM2_T2M_WORLD):
     with CaptureNewVariables() as _C3S_BOM2_TPRATE_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
