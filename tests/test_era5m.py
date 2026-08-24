@@ -74,7 +74,9 @@ def test_index_is_monthly_and_grouped_by_year(task_cls):
 
     sample = task.data_index.iloc[0]
     assert sample["local_file"].endswith("era5m_%s_2024.03.grib" % task_cls.VARIABLE)
-    assert sample["stored_file"].endswith("2024/tethys_era5m_%s_2024.nct" % task_cls.VARIABLE)
+    # Storage is flat under ERA5Land/Monthly: one file per year, so no year folder.
+    assert sample["stored_file"].endswith(
+        "ERA5Land/Monthly/era5m_{v}_world/tethys_era5m_{v}_2024.nct".format(v=task_cls.VARIABLE))
 
 
 @pytest.mark.parametrize("task_cls", WORLD_CLASSES, ids=lambda cls: cls.__name__)
@@ -85,6 +87,22 @@ def test_storage_search_window_spans_a_year(task_cls):
     reference = pd.Timestamp("2024-06-01")
     assert reference - task._storage_search_window <= pd.Timestamp("2024-01-01")
     assert reference + task._storage_search_window >= pd.Timestamp("2024-12-01")
+
+
+@pytest.mark.parametrize("task_cls", WORLD_CLASSES, ids=lambda cls: cls.__name__)
+def test_faulty_period_covers_accumulated_variables_only(task_cls):
+    # ERA5-Land monthly means carry wrong accumulated variables from Sep 2022 to Feb 2024.
+    # The fault is invisible in the grib headers, so the window is hardcoded and must stay
+    # exact: an off-by-one month either stores bad data or discards good data.
+    task = _build_task(task_cls, date_from="2021-01-01", date_to="2025-12-31")
+    accumulated = task_cls.VARIABLE in task_cls.FAULTY_PERIOD_VARIABLES
+
+    assert task._in_faulty_period("2022-09-01") is accumulated
+    assert task._in_faulty_period("2023-06-01") is accumulated
+    assert task._in_faulty_period("2024-02-01") is accumulated
+    # the months either side are good for every variable
+    assert task._in_faulty_period("2022-08-01") is False
+    assert task._in_faulty_period("2024-03-01") is False
 
 
 @pytest.mark.parametrize("task_cls", WORLD_CLASSES, ids=lambda cls: cls.__name__)

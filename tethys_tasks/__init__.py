@@ -56,6 +56,10 @@ try:
 except ImportError:
     _icon_eu = None
 try:
+    from . import icon_world as _icon_world
+except ImportError:
+    _icon_world = None
+try:
     from . import meteofrance as _meteofrance
 except ImportError:
     _meteofrance = None
@@ -89,6 +93,6 @@ def _export_public_classes(module):
         globals()[name] = getattr(module, name)
     __all__.extend(public)
 
-for _module in (_era5, _era5w, _era5m, _irm, _irm_radar, _gfs, _gpm, _c3s, _cerra, _icon_ch, _icon_eu, _clms_snow, _meteofrance, _ecmwf, _ipma):
+for _module in (_era5, _era5w, _era5m, _irm, _irm_radar, _gfs, _gpm, _c3s, _cerra, _icon_ch, _icon_eu, _icon_world, _clms_snow, _meteofrance, _ecmwf, _ipma):
     if _module is not None:
         _export_public_classes(_module)

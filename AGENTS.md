@@ -50,6 +50,55 @@ subclasses `BaseTask` (in [tethys_tasks/base.py](tethys_tasks/base.py)):
   `<LOCAL_FILE_FOLDER>/ICON_CH_CONSTANTS/` on first use, and reuses them afterwards.
   That folder is a mounted volume, so a Docker run only pays for it once.
 
+## GRIB definitions (eccodes) -- read before touching any GRIB driver
+
+eccodes caches its definitions on **first use**, so whichever set is used first wins for the
+rest of the process. `codes_set_definitions_path()` afterwards is a no-op.
+
+- Every driver except ICON-CH decodes with the stock eccodes definitions.
+- ICON-CH needs the DWD/COSMO tables. `meteodatalab.data_source` applies them per call via
+  `cosmo_grib_defs()` (from the version-matched `eccodes-cosmo-resources-python`) and restores
+  the path afterwards. Do **not** set `ECCODES_DEFINITION_PATH`: `meteodatalab.grib_def_ctx`
+  disables its own COSMO handling when that variable is set, and the overlay then leaks into
+  every other driver. That is what broke all GRIB drivers on 2026-08-24, when a rebuild moved
+  eccodes to 2.47 while `icon_ch.py` was still pointing at a vendored ~2.38 overlay.
+- Consequence: **one class per process**. Each Airflow task runs one class in its own
+  container, so ICON-CH is the only GRIB consumer in its process and COSMO is active from the
+  first read. Reading any other GRIB first makes `grib_decoder.load` return `{}` for CLON/CLAT
+  instead of raising -- `icon_ch.read_local` turns that into an explicit error.
+  `acquisition_status(refresh=True)` is safe to loop over all classes: it never decodes GRIB.
+- The GRIB stack is pinned as one family in `environment.yml`. `python -m
+  tethys_tasks.check_grib_stack` verifies it (stock and COSMO, one subprocess each) and runs as
+  a `Dockerfile` build step, so an incoherent image fails the build instead of the DAGs.
+
+## Grid geometry (eckit-geo)
+
+`earthkit-data` sets `ECCODES_ECKIT_GEO=1` at import (`earthkit/data/__init__.py`), and since
+`icon_ch` imports it, **every** driver decodes grids through `eckit::geo`. Leave it that way:
+eckit-geo is what supports unstructured grids, so turning it off breaks ICON-CH and
+`ICON_WORLD` (`GribGeographyBuilder: cannot use unstructured grid`). `check_grib_stack` guards
+against it being set to `0`.
+
+The backends only disagree where a GRIB header is self-inconsistent. IRM/ALARO declares
+`jDirectionIncrementInDegrees` 0.035 while `first/last/Nj` imply 0.035375; the legacy code put
+the whole discrepancy in one trailing latitude row (which is the row `irm.py` drops with
+`[:-1]`), eckit-geo spreads it across every row. That silently shifted the ALARO grid on
+2026-08-24 and broke `join` against the archive with `Latitudes do not match`. `irm.py` now
+rebuilds latitudes from the declared increment (`GRIB_latitudeOfFirstGridPointInDegrees` +
+`arange * GRIB_jDirectionIncrementInDegrees`), so it no longer depends on the backend. Any new
+driver reading a GRIB with an inconsistent header needs the same treatment -- the failure is
+silent until a join against older stored data catches it.
+
+## Corrupt local files
+
+`BaseTask.store()` quarantines a local file it cannot read (GRIB decode error, broken archive,
+or a leadtime mismatch in the strict join): it renames it to `<name>.corrupt`, drops it from the
+folder's `completeness.csv`, stores whatever else was readable, and then **still raises** so the
+Airflow retry re-downloads it. Nothing is ever deleted. It does not catch a file that decodes
+*partially* and is read first in its storage group -- that still gets NaN-padded and stored, as
+before. `gpm` has its own `_read_local_safe`; `irm_radar` must never quarantine, since its
+"local" files are the read-only IRM archive.
+
 ## Acquisition status (reporting)
 
 `BaseTask.acquisition_status(refresh=False)` is a read-only instance method that

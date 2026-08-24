@@ -45,6 +45,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # float64, so this halves what a stored file is held at.
 _LOAD_FLOAT32 = {"dtype": "float32"} if "dtype" in inspect.signature(MeteoRaster.load).parameters else {}
 
+# ECMWF GRIB1 table-128 parameter numbers, used by import_from_archive() to confirm an
+# archive holds the variable the task expects before anything is written.
+_GRIB1_PARAMETER = dict(t2m=167, tp=228, sd=141)
+
+# MARS experiment version of the final reanalysis. '0005' is ERA5T, the preliminary
+# release that gets replaced ~3 months later, so it is never imported.
+_FINAL_EXPVER = '0001'
+
 
 class ERA5M_T2M_WORLD(BaseTask):
     '''
@@ -89,7 +97,24 @@ class ERA5M_T2M_WORLD(BaseTask):
 
         CLOUD_TEMPLATE = 'ERA5M_{self._variable_upper}/era5m_{self._variable}_world/%Y/era5m_{self._variable}_%Y.%m.grib'
         LOCAL_PATH_TEMPLATE = 'ERA5M_{self._variable_upper}/era5m_{self._variable}_world/%Y/era5m_{self._variable}_%Y.%m.grib'
-        STORAGE_PATH_TEMPLATE = 'ERA5M_{self._variable_upper}/era5m_{self._variable}_world/%Y/tethys_era5m_{self._variable}_%Y.nct'
+        # Storage (and hence Dropbox, which mirrors it) is flat: one file per year, so a
+        # year folder would hold exactly one .nct. Every folder level here is static once
+        # {self._variable} is resolved, which keeps _stored_retention_scope's prune root
+        # per-variable instead of widening it to the shared root.
+        STORAGE_PATH_TEMPLATE = 'ERA5Land/Monthly/era5m_{self._variable}_world/tethys_era5m_{self._variable}_%Y.nct'
+
+        # ERA5-Land monthly means carry wrong ACCUMULATED variables from Sep 2022 to Feb
+        # 2024 (the Bologna data-centre migration): tp comes out at ~half its correct value.
+        # The fault is not detectable per message -- an affected 31-day month has
+        # byte-identical grib headers to a good one -- so the window has to be hardcoded.
+        # These months are never acquired, and reading one raises instead of letting it
+        # reach a stored file. ECMWF's workaround is the by-hour-of-day product, which this
+        # driver does not request.
+        # https://forum.ecmwf.int/t/data-conflict-era5-land-monthly-averaged-data-from-1950-to-present/1309
+        FAULTY_PERIOD_FROM = '2022-09-01'
+        FAULTY_PERIOD_TO = '2024-02-29'
+        # Only accumulated variables are affected; ssrd/ssr would belong here if ever added.
+        FAULTY_PERIOD_VARIABLES = ('tp',)
 
         DATASET = 'reanalysis-era5-land-monthly-means'
         PRODUCT_TYPE = 'monthly_averaged_reanalysis'
@@ -117,6 +142,39 @@ class ERA5M_T2M_WORLD(BaseTask):
         if verbosity == 'debug':
             return cdsapi.Client(debug=True, progress=progress)
         return cdsapi.Client(progress=progress)
+
+    def _in_faulty_period(self, production_datetime) -> bool:
+        '''True for months whose data is known bad (see FAULTY_PERIOD_FROM).'''
+
+        if self._variable not in self._faulty_period_variables:
+            return False
+        return (pd.Timestamp(self._faulty_period_from)
+                <= pd.Timestamp(production_datetime)
+                <= pd.Timestamp(self._faulty_period_to))
+
+    def _reject_faulty_period(self, local_file) -> None:
+        '''
+        Raises if a local file falls in the faulty window. The production datetime comes
+        from the index when the file is in it, else from the grib itself, so a manually
+        placed or restored file is caught too.
+        '''
+
+        rows = self.data_index.loc[self.data_index['local_file'] == local_file, 'production_datetime']
+        if len(rows) > 0:
+            production_datetime = pd.Timestamp(rows.iloc[0])
+        else:
+            try:
+                production_datetime = self._grib_production_datetime(local_file)
+            except OSError:
+                # Unreadable: leave it to the caller's discard-and-unlink handling rather
+                # than turning a corrupt file into a faulty-window error.
+                return
+        if self._in_faulty_period(production_datetime):
+            raise Exception(
+                f'"{Path(local_file).name}" is {production_datetime.strftime("%Y-%m")}, inside the known-bad '
+                f'ERA5-Land window {self._faulty_period_from}..{self._faulty_period_to} for '
+                f'"{self._variable}". This file must not be stored -- delete it '
+                f'({self.__class__.__name__}).')
 
     @staticmethod
     def _grib_looks_intact(grib_file) -> bool:
@@ -215,13 +273,17 @@ class ERA5M_T2M_WORLD(BaseTask):
             self.diag('        Nothing to download.', 1)
             return False
 
-        info = []
+        info, faulty = [], []
         for local_path in files_to_download:
             rows = self.data_index.loc[self.data_index['local_file'] == local_path]
             date = pd.Timestamp(rows['production_datetime'].iloc[0]).replace(day=1, hour=0)
 
             # Never request a month that is not published yet.
             if date > self.last_production_datetime:
+                continue
+
+            if self._in_faulty_period(date):
+                faulty.append(date)
                 continue
 
             options = {'data_format': 'grib',
@@ -234,6 +296,18 @@ class ERA5M_T2M_WORLD(BaseTask):
                        'nocache': ''.join(random.choice(string.digits) for _ in range(6)),
                        }
             info.append((options, local_path))
+
+        if faulty:
+            # Loud, but not fatal: these months stay permanently absent, so raising here
+            # would make every full-history run fail. A request that is ENTIRELY faulty is
+            # a different matter -- it can only ever produce nothing.
+            self.diag(f'        Skipping {len(faulty)} month(s) in the known-bad '
+                      f'{self._faulty_period_from}..{self._faulty_period_to} window.', 1)
+            if not info:
+                raise Exception(
+                    f'Every requested month falls in the known-bad ERA5-Land window '
+                    f'{self._faulty_period_from}..{self._faulty_period_to} for "{self._variable}" '
+                    f'({self.__class__.__name__}).')
 
         if not info:
             self.diag('        Nothing to download.', 1)
@@ -254,6 +328,138 @@ class ERA5M_T2M_WORLD(BaseTask):
                         self.diag(f'        Download failed for {Path(local_path_).name}.', 1)
 
         return downloaded
+
+    # ------------------------------------------------------- archive import
+    @staticmethod
+    def _grib1_messages(archive_file):
+        '''
+        Yields (offset, length, parameter, production_datetime, expver) for every GRIB1
+        message in a concatenated archive, reading headers only.
+
+        Messages are self-delimiting, so this never hands the whole archive to eccodes --
+        which is what keeps a multi-GB archive readable on Windows, where eccodes gives up
+        around 4 GB. Offsets are plain file positions, so archive size is irrelevant.
+
+        GRIB1 layout used here: section 0 is 'GRIB' + 3-byte total length + edition. The
+        PDS then carries the parameter (octet 9), the reference date (octets 13-16 with the
+        century at octet 25) and, in the ECMWF local definition, MARS expver (octets 46-49).
+        '''
+
+        archive_file = Path(archive_file)
+        size = archive_file.stat().st_size
+        offset = 0
+        with open(archive_file, 'rb') as f:
+            while offset < size:
+                f.seek(offset)
+                section0 = f.read(8)
+                if len(section0) < 8 or section0[:4] != b'GRIB':
+                    raise OSError(f'No GRIB message at offset {offset} of "{archive_file.name}".')
+                if section0[7] != 1:
+                    raise OSError(f'Only GRIB edition 1 is supported, found edition {section0[7]} '
+                                  f'at offset {offset} of "{archive_file.name}".')
+                length = int.from_bytes(section0[4:7], 'big')
+
+                pds = f.read(49)
+                if len(pds) < 49:
+                    raise OSError(f'Truncated PDS at offset {offset} of "{archive_file.name}".')
+                production_datetime = pd.Timestamp(year=(pds[24] - 1) * 100 + pds[12],
+                                                   month=pds[13], day=pds[14], hour=pds[15])
+                yield (offset, length, pds[8], production_datetime, pds[45:49].decode('ascii', 'replace'))
+
+                offset += length
+
+    def _archive_message_is_placeable(self, blob, length) -> bool:
+        '''Structural check on an extracted message, before it is written anywhere.'''
+
+        return len(blob) == length and blob[:4] == b'GRIB' and blob[-4:] == b'7777'
+
+    def import_from_archive(self, archive_file:str, overwrite:bool=False, dry_run:bool=False) -> int:
+        '''
+        Recreates the per-month local files from a concatenated GRIB1 archive, as if they
+        had been retrieved from CDS.
+
+        A CDS monthly-means archive is a plain concatenation of the very messages the API
+        returns one per request, so messages are copied out byte for byte -- no decoding and
+        no re-encoding, which makes the results bit-identical to a download (verified by
+        sha256 against real downloads). Only `expver` 0001 is taken, so the preliminary
+        ERA5T release of the most recent months never overwrites final data.
+
+        Target paths come from self.data_index, so the path templates are never restated
+        here and months outside the task's date range are skipped.
+
+        Returns the number of local files written.
+        '''
+
+        self.diag(f'    Importing from "{archive_file}"...', 1)
+
+        expected_parameter = _GRIB1_PARAMETER.get(self._variable)
+        if expected_parameter is None:
+            raise Exception(f'No GRIB1 parameter known for "{self._variable}" ({self.__class__.__name__}).')
+
+        # Keyed on the index's own local_file string: base joins the root with a literal
+        # '/', so a str(Path(...)) round trip would no longer match it on Windows.
+        wanted = {pd.Timestamp(p): l for p, l
+                  in self.data_index[['production_datetime', 'local_file']].itertuples(index=False)}
+
+        written = skipped = preliminary = outside = faulty = 0
+        with open(archive_file, 'rb') as source:
+            for offset, length, parameter, production_datetime, expver in self._grib1_messages(archive_file):
+                if parameter != expected_parameter:
+                    raise Exception(f'"{Path(archive_file).name}" holds parameter {parameter} at offset '
+                                    f'{offset}, expected {expected_parameter} for "{self._variable}" '
+                                    f'({self.__class__.__name__}).')
+
+                local_file = wanted.get(production_datetime)
+                if local_file is None:
+                    outside += 1
+                    continue
+                local_path = Path(local_file)
+
+                if self._in_faulty_period(production_datetime):
+                    self.diag(f'        Skipping {production_datetime.strftime("%Y-%m")}: inside the '
+                              f'known-bad window.', 2)
+                    faulty += 1
+                    continue
+
+                if expver != _FINAL_EXPVER:
+                    self.diag(f'        Skipping {production_datetime.strftime("%Y-%m")}: preliminary '
+                              f'data (expver {expver}).', 2)
+                    preliminary += 1
+                    continue
+
+                if not overwrite and local_path.exists() and local_path.stat().st_size == length \
+                        and self._grib_looks_intact(local_path):
+                    skipped += 1
+                    continue
+
+                if dry_run:
+                    self.diag(f'        Would write {local_path.name}.', 2)
+                    written += 1
+                    continue
+
+                source.seek(offset)
+                blob = source.read(length)
+                if not self._archive_message_is_placeable(blob, length):
+                    raise Exception(f'Message for {production_datetime.strftime("%Y-%m")} at offset {offset} '
+                                    f'is not a complete GRIB ({self.__class__.__name__}).')
+
+                # Same contract as _download_cds_month: nothing incomplete is ever visible
+                # under the final name. The '.part' suffix also keeps the temporary file out
+                # of the '*.grib' rglob that base uses to detect local files.
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                partial_path = local_path.with_name(local_path.name + '.part')
+                with open(partial_path, 'wb') as target:
+                    target.write(blob)
+                os.replace(partial_path, local_path)
+
+                self.data_index.loc[self.data_index['local_file'] == local_file, 'local_file_exists'] = True
+                written += 1
+
+        self.diag(f'        {"Would write" if dry_run else "Wrote"} {written}, kept {skipped} already present, '
+                  f'skipped {preliminary} preliminary, {faulty} known-bad and {outside} outside '
+                  f'the date range.', 1)
+
+        return written
 
     # ------------------------------------------------------------------- reads
     @staticmethod
@@ -316,6 +522,8 @@ class ERA5M_T2M_WORLD(BaseTask):
         if not Path(local_file).exists():
             raise Exception('Local file does not exit.')
 
+        self._reject_faulty_period(local_file)
+
         data = self._read_helper(local_file)
 
         # store() places the read into a slot chosen by production_datetime, where a
@@ -359,6 +567,10 @@ class ERA5M_T2M_WORLD(BaseTask):
         partial transfer, and the base code calls read_local() unguarded, so a
         truncated file trusted on existence alone would abort every subsequent run.
         '''
+
+        # Deliberately outside the try below: a known-bad month must surface as an error,
+        # not be swallowed into the discard-and-unlink path.
+        self._reject_faulty_period(local_file)
 
         try:
             production_datetime = self._grib_production_datetime(local_file)

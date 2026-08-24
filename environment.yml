@@ -23,7 +23,13 @@ dependencies:
   - curl
   - paramiko
   - xarray
-  - cfgrib
+  # GRIB stack pinned as one family. conda-forge python-eccodes registers with pip as
+  # `eccodes==<same version>`, so pinning it inside meteodata-lab's `eccodes>=2.47,<2.48`
+  # range stops pip from replacing it with its own wheel + bundled eccodeslib. Two eccodes
+  # libraries in one env is what broke every GRIB driver on 2026-08-24.
+  - cfgrib=0.9.15.*
+  - eccodes=2.47.*
+  - python-eccodes=2.47.*
   - gdal
   - scikit-learn
   - pandas
@@ -53,8 +59,10 @@ dependencies:
     - xlwings
     - openpyxl
     - build
-    - meteodata-lab[regrid]~=0.4
-    - earthkit-plots>=0.3,<0.4
+    - meteodata-lab[regrid]==0.8.*
+    - eccodes-cosmo-resources-python==2.47.0.*
+    - earthkit-data==1.2.*
+    - earthkit-plots==0.3.*
     - nbconvert>=7.16.6
     - nbformat>=5.10.4
     - meteoraster

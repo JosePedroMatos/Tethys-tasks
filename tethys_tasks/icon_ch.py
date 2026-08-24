@@ -6,10 +6,6 @@ import hashlib
 
 _ICON_CH_RESOURCES = Path(__file__).resolve().parent / 'resources' / 'icon_ch'
 
-_LOCAL_ECCODES_DEFINITIONS = _ICON_CH_RESOURCES / 'eccodes_definitions'
-if _LOCAL_ECCODES_DEFINITIONS.exists():
-    os.environ.setdefault('ECCODES_DEFINITION_PATH', str(_LOCAL_ECCODES_DEFINITIONS))
-
 # Folder where static model constants that are too large to keep in the repository are cached.
 # It resolves to the mounted local file folder so that a docker run does not re-download them,
 # falling back to the resources folder when no local folder is configured.
@@ -18,6 +14,11 @@ _CONSTANTS_CACHE = Path(
     or _ICON_CH_RESOURCES
 ) / 'ICON_CH_CONSTANTS'
 
+# COSMO/DWD GRIB tables are NOT set up here. meteodatalab.data_source applies the
+# version-matched eccodes-cosmo-resources definitions inside a context manager
+# (cosmo_grib_defs) and restores the previous path afterwards. Setting
+# ECCODES_DEFINITION_PATH in this process disables that (see grib_def_ctx) and leaks the
+# overlay into every other driver, which broke all GRIB reads when eccodes moved to 2.47.
 from meteodatalab import data_source, grib_decoder, ogd_api
 from meteodatalab.operators import time_operators, regrid
 from rasterio.crs import CRS
@@ -345,6 +346,19 @@ class ICON_CH2_EPS_TOT_PREC(BaseTask):
                 {'param': ['CLON', 'CLAT']},
                 geo_coords=lambda _: {},
             )
+            # CLON/CLAT only resolve while the COSMO tables are active, and meteodatalab can only
+            # activate them if nothing has decoded GRIB in this process yet: eccodes caches its
+            # definitions on first use, after which codes_set_definitions_path() is a no-op. The
+            # filter then matches nothing and load() returns {} instead of raising. One class per
+            # container keeps that safe; this turns the silent case into a legible failure (and
+            # keeps it out of BaseTask's corrupt-file quarantine, which treats KeyError as data rot).
+            missing = [param for param in ('CLON', 'CLAT') if param not in coord_fields]
+            if missing:
+                raise RuntimeError(
+                    f'ICON-CH horizontal constants decoded without {missing} (got: '
+                    f'{sorted(coord_fields)}). The COSMO GRIB tables are not active -- another '
+                    'driver decoded GRIB earlier in this process.'
+                )
             geo_coords = {
                 'lon': coord_fields['CLON'].squeeze(),
                 'lat': coord_fields['CLAT'].squeeze(),

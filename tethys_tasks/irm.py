@@ -199,7 +199,6 @@ class ALARO40L_T2M(BaseTask):
     def _read_local_helper(self, variable_file: str) -> dict:
         data = {}
         with xr.open_dataset(variable_file, engine='cfgrib', indexpath='') as ds:
-            data['latitudes'] = ds.latitude.data[:-1]
             data['longitudes'] = ds.longitude.data
             data['production_datetime'] = pd.to_datetime(np.array((ds.time.data,)))
             data['leadtimes'] = pd.to_timedelta(ds.valid_time.data-ds.time.data)
@@ -207,6 +206,17 @@ class ALARO40L_T2M(BaseTask):
             var = list(ds.data_vars)
             if len(var)!=1:
                 raise(f'Problem with dataset vars in {variable_file} ({self.__class__.__name__})')
+
+            # The IRM headers are self-inconsistent: jDirectionIncrement says 0.035 while
+            # first/last/Nj imply 0.035375. eccodes resolves that differently per geometry
+            # backend -- the legacy code puts the whole error in one trailing row (which is why
+            # the last row is dropped below), eckit-geo spreads it over every row -- so reading
+            # ds.latitude would silently re-grid the product when the backend changes. The
+            # declared increment is what the stored archive is on, so rebuild from it.
+            attrs = ds[var[0]].attrs
+            data['latitudes'] = (attrs['GRIB_latitudeOfFirstGridPointInDegrees']
+                                 + np.arange(ds.latitude.size - 1)
+                                 * attrs['GRIB_jDirectionIncrementInDegrees'])
 
             data['data'] = np.expand_dims(ds[var[0]].data[:, :-1, :], axis=(0, 1))
 

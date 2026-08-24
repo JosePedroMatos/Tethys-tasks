@@ -2,6 +2,8 @@
 import pandas as pd
 import os
 import re
+import tarfile
+import zipfile
 from pathlib import Path
 from tethys_tasks import CaptureNewVariables, running_in_docker, DownloadMonitor, UploadMonitor, CompletenessIndex
 from collections.abc import Iterable
@@ -28,6 +30,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # How many of the newest stored files are kept locally and on Dropbox.
 STORED_RETENTION_COUNT = 3
+
+def _is_corrupt_local_file(ex: Exception) -> bool:
+    '''
+    True when the exception means "this local file's contents are bad" rather than "the code
+    is wrong". A truncated GRIB surfaces either as an eccodes/cfgrib decode failure or, when
+    it still decodes partially, as a leadtime mismatch in the strict join downstream. Most
+    drivers ship GRIBs inside a zip, so a broken archive counts too.
+
+    gribapi errors are matched by module rather than by class: importing gribapi.errors here
+    can hit a circular import when the env has two eccodes installs, and that is exactly the
+    situation in which this classifier must not silently stop working.
+    '''
+
+    if isinstance(ex, (EOFError, KeyError, zipfile.BadZipFile, tarfile.ReadError)):
+        return True
+    if type(ex).__module__.split('.')[0] in ('gribapi', 'eccodes'):
+        return True
+    return 'do not all match' in str(ex)
 
 class BaseTask():
     '''
@@ -1180,6 +1200,40 @@ class BaseTask():
         if self.verbose >= verbose:
             print(msg)
 
+    def _quarantine_local_file(self, local_file:str, reason:str) -> None:
+        '''
+        Renames an unreadable local file to <name>.corrupt and drops it from the index so the
+        next run re-downloads it. It is never deleted: a false positive then costs only a
+        download, and the file stays available for inspection.
+
+        Only reached from BaseTask.store(). Do not wire it into irm_radar, whose "local" files
+        are the read-only IRM archive itself (see AGENTS.md); gpm has its own _read_local_safe.
+        '''
+
+        local_file_ = Path(local_file)
+        target = local_file_.with_name(local_file_.name + '.corrupt')
+
+        try:
+            if local_file_.exists():
+                if target.exists():
+                    target.unlink()
+                local_file_.rename(target)
+                self.diag(f'            Quarantined "{local_file_.name}" -> "{target.name}" ({reason}).', 1)
+            else:
+                self.diag(f'            Nothing to quarantine, "{local_file_}" is gone ({reason}).', 1)
+        except Exception as ex:
+            self.diag(f'            Could not quarantine "{local_file_}": {ex}.', 1)
+            return
+
+        # local_file_exists=False is what keeps the remaining storage files in this run from
+        # picking the file up again; retrieve() re-downloads it on the next attempt.
+        mask = self.data_index['local_file'] == local_file
+        self.data_index.loc[mask, ['local_file_exists', 'local_file_complete']] = False
+
+        ci = CompletenessIndex(local_file_.parent)
+        ci.remove([local_file_.name])
+        ci.write()
+
     def store(self) -> bool:
         '''
         Docstring for store
@@ -1202,6 +1256,7 @@ class BaseTask():
         self._update_index_and_completeness()
 
         self.diag('    Storing...', 2)
+        quarantined = []
         stored_files = self.data_index.loc[~self.data_index['stored_file_complete'], 'stored_file'].unique()
         for s0 in stored_files[::-1]:
             # Collect data
@@ -1224,21 +1279,27 @@ class BaseTask():
 
             local_files = index_to_include['local_file'].unique()
             for l1 in local_files:
-                # Read file
-                mr = self.read_local(l1)
-                mr.verbose = False
+                try:
+                    # Read file
+                    mr = self.read_local(l1)
+                    mr.verbose = False
 
-                # Reduce footpring for storage (here to save memory)
-                if not self.storage_bounding_box is None:
-                    mr = mr.getCropped(
-                        **{a:self.storage_bounding_box[k] for a, k in zip(['from_lat', 'to_lat', 'from_lon', 'to_lon'],
-                                                                          ['south', 'north', 'west', 'east'])})
-                
-                # Join to previous reads
-                if data is None:
-                    data = mr
-                else:
-                    data.join(mr, strickt=True)
+                    # Reduce footpring for storage (here to save memory)
+                    if not self.storage_bounding_box is None:
+                        mr = mr.getCropped(
+                            **{a:self.storage_bounding_box[k] for a, k in zip(['from_lat', 'to_lat', 'from_lon', 'to_lon'],
+                                                                              ['south', 'north', 'west', 'east'])})
+
+                    # Join to previous reads
+                    if data is None:
+                        data = mr
+                    else:
+                        data.join(mr, strickt=True)
+                except Exception as ex:
+                    if not _is_corrupt_local_file(ex):
+                        raise
+                    self._quarantine_local_file(l1, f'{type(ex).__name__}: {ex}')
+                    quarantined.append(l1)
 
             if data is None:
                 continue
@@ -1283,6 +1344,12 @@ class BaseTask():
 
         # Update completeness
         self._update_index_and_completeness(local=False, cloud=False)
+
+        # Whatever was readable is now stored, but the task must still fail: the retry finds the
+        # quarantined files gone from the index and re-downloads them.
+        if quarantined:
+            raise Exception('Quarantined %d unreadable local file(s), re-download needed: %s' %
+                            (len(quarantined), ', '.join(Path(f).name for f in quarantined)))
 
         return stored
         
