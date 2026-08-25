@@ -46,6 +46,12 @@ class C3S_ECMWF51_T2M_WORLD(BaseTask):
         PUBLICATION_LATENCY = pd.Timedelta(days=13)
         PRODUCTION_FREQUENCY = pd.DateOffset(months=1)
         FAIL_IF_OLDER = pd.Timedelta(days=45)
+
+        # True once CDS retires the system version: the archive stays readable but no new month
+        # will ever arrive, so the class must not be scheduled and must not be asked for recent
+        # data. CDS answers 400 for a retired system, which retrieve() reports through
+        # FAIL_IF_OLDER only when the caller passes fail_if_older=True.
+        ARCHIVE_ONLY = False
                 
         LEADTIME_MONTH = ['1', '2', '3', '4', '5', '6']   # CDS request: 1 is the initialisation month
         LEADTIMES = [pd.DateOffset(months=int(m)-1) for m in LEADTIME_MONTH]
@@ -316,6 +322,9 @@ class C3S_UKMO604_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
     with CaptureNewVariables() as _C3S_UKMO604_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         VARIABLE='t2m'
         ZONE='world'
+        # Superseded by UKMO610; last month on CDS was 2026.02.
+        ARCHIVE_ONLY = True
+
 
         C3S_SYSTEM = '604'
         ORIGINATING_CENTRE = 'ukmo'
@@ -417,6 +426,9 @@ class C3S_JMA4_TPRATE_WORLD(C3S_JMA4_T2M_WORLD):
 class C3S_JMA3_T2M_WORLD(C3S_UKMO610_T2M_WORLD):
     with CaptureNewVariables() as _C3S_JMA3_T2M_WORLD_VARIABLES: #It is essential that the format of the variable here is _CLASSNAME_VARIABLES
         C3S_SYSTEM = '3'
+        # Superseded by JMA4; last month on CDS was 2026.01.
+        ARCHIVE_ONLY = True
+
         ORIGINATING_CENTRE = 'jma'
 
         MISSING_YEARS = [i for i in range(1970, 1993)]
@@ -473,34 +485,34 @@ if __name__=='__main__':
     classes = [
         C3S_ECMWF51_T2M_WORLD,
         C3S_ECMWF51_TPRATE_WORLD,
-        # C3S_UKMO610_T2M_WORLD,
-        # C3S_UKMO610_TPRATE_WORLD,
-        # C3S_MF9_T2M_WORLD,
-        # C3S_MF9_TPRATE_WORLD,
-        # C3S_DWD22_T2M_WORLD,
-        # C3S_DWD22_TPRATE_WORLD,
-        # C3S_CMCC4_T2M_WORLD,
-        # C3S_CMCC4_TPRATE_WORLD,
-        # C3S_NCEP2_T2M_WORLD,
-        # C3S_NCEP2_TPRATE_WORLD,
-        # C3S_JMA4_T2M_WORLD,
-        # C3S_JMA4_TPRATE_WORLD,
-        # C3S_ECCC5_T2M_WORLD,
-        # C3S_ECCC5_TPRATE_WORLD,
-        # C3S_BOM2_T2M_WORLD,
-        # C3S_BOM2_TPRATE_WORLD,
+        C3S_UKMO610_T2M_WORLD,
+        C3S_UKMO610_TPRATE_WORLD,
+        C3S_MF9_T2M_WORLD,
+        C3S_MF9_TPRATE_WORLD,
+        C3S_DWD22_T2M_WORLD,
+        C3S_DWD22_TPRATE_WORLD,
+        C3S_CMCC4_T2M_WORLD,
+        C3S_CMCC4_TPRATE_WORLD,
+        C3S_NCEP2_T2M_WORLD,
+        C3S_NCEP2_TPRATE_WORLD,
+        C3S_JMA4_T2M_WORLD,
+        C3S_JMA4_TPRATE_WORLD,
+        C3S_ECCC5_T2M_WORLD,
+        C3S_ECCC5_TPRATE_WORLD,
+        C3S_BOM2_T2M_WORLD,
+        C3S_BOM2_TPRATE_WORLD,
 
-        # C3S_JMA3_T2M_WORLD,
-        # C3S_JMA3_TPRATE_WORLD,
+        C3S_JMA3_T2M_WORLD,
+        C3S_JMA3_TPRATE_WORLD,
 
-        # C3S_UKMO604_T2M_WORLD,
-        # C3S_UKMO604_TPRATE_WORLD,
+        C3S_UKMO604_T2M_WORLD,
+        C3S_UKMO604_TPRATE_WORLD,
     ]
     
     for cls in classes:
         try:
             print(f'Processing {cls.__name__}...')
-            c3s = cls(download_from_origin=True, date_from='2026-01-01', verbose=True, assume_local_complete=True)
+            c3s = cls(download_from_origin=False, date_from='2026-05-01', verbose=True, assume_local_complete=True)
             c3s.update()
         except Exception as ex:
             raise

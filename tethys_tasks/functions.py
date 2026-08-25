@@ -180,7 +180,18 @@ class CompletenessIndex():
                 self.index[f0] = False
 
     def include(self, files:Iterable):
-        self.index = self.index.reindex(files, fill_value=True)
+        '''
+        Marks files complete, keeping entries already in the index.
+
+        This used to reindex onto `files`, which *dropped* every other entry. Harmless while each
+        storage file sat in its own folder, but a template that puts many files in one folder
+        (ERA5M: one file per year, all under ERA5Land/Monthly/...) lost the whole index on every
+        run, and write() then deleted the sidecar because nothing was left marked complete.
+        Entries for files that have since disappeared are pruned by check_existance()/write().
+        '''
+
+        for f0 in files:
+            self.index[f0] = True
 
     def get_complete(self):
         return self.index[self.index].index.tolist()

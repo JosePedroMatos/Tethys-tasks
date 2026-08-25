@@ -87,7 +87,10 @@ the whole discrepancy in one trailing latitude row (which is the row `irm.py` dr
 rebuilds latitudes from the declared increment (`GRIB_latitudeOfFirstGridPointInDegrees` +
 `arange * GRIB_jDirectionIncrementInDegrees`), so it no longer depends on the backend. Any new
 driver reading a GRIB with an inconsistent header needs the same treatment -- the failure is
-silent until a join against older stored data catches it.
+silent until a join against older stored data catches it. `python -m
+tethys_tasks.check_grid_headers [CLASS ...]` flags such files from the headers alone (no stored
+file needed). As of 2026-08-24 ALARO is the only product that trips it; ERA5/ERA5W/ERA5M, C3S,
+ECMWF HRES/ENS, AROME, IPMA and ICON-CH are all exact, and GFS/GPM/CLMS are not GRIB.
 
 ## Corrupt local files
 

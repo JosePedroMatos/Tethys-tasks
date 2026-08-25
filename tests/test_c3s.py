@@ -79,6 +79,11 @@ def test_world_class_pixel_sizes_and_leadtimes_match():
 @pytest.mark.parametrize("task_cls", WORLD_CLASSES, ids=lambda cls: cls.__name__)
 def test_retrieve_store_and_upload_real_for_all_world_classes(task_cls, tmp_path):
 
+    if getattr(task_cls, "ARCHIVE_ONLY", False):
+        # CDS answers 400 for a retired system version, so asking it for recent data can only
+        # fail. The archive stays readable and is covered by the offline tests.
+        pytest.skip(f"{task_cls.__name__} is archive-only: CDS no longer publishes this system")
+
     date_from = (pd.Timestamp.utcnow().tz_localize(None) - pd.DateOffset(months=3)).strftime("%Y-%m-%d")
 
     task = _build_task(
